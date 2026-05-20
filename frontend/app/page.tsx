@@ -229,7 +229,7 @@ export default function Home() {
               : "Nueva conversación"}
           </span>
           <span className="text-xs text-gray-500 ml-auto">
-            Artificial Intelligence Driven ENvironment by JJRM by JJRM
+            Artificial Intelligence Driven ENvironment by JJRM
           </span>
         </div>
 
