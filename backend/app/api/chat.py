@@ -1,8 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.llm.client import stream_chat
-from typing import List
+from app.services.conversation.service import (
+    create_conversation, save_message, get_messages
+)
+from app.core.database import get_db
+from typing import List, Optional
 
 router = APIRouter()
 
@@ -12,10 +17,38 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[Message]
+    conversation_id: Optional[str] = None
+
+async def stream_and_save(messages, conversation_id, db):
+    full_response = ""
+    order = len(messages)
+
+    # Guardar mensaje del usuario
+    user_msg = messages[-1]
+    await save_message(db, conversation_id, user_msg.role, user_msg.content, order - 1)
+
+    async for chunk in stream_chat(messages):
+        if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
+            text = chunk[6:].replace("\\n", "\n").rstrip("\n\n")
+            full_response += text
+        yield chunk
+
+    # Guardar respuesta del asistente
+    if full_response:
+        await save_message(db, conversation_id, "assistant", full_response, order)
+
+    # Enviar el conversation_id al cliente
+    yield f"data: [CONV:{conversation_id}]\n\n"
 
 @router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+    # Crear conversación si no existe
+    conversation_id = request.conversation_id
+    if not conversation_id:
+        conv = await create_conversation(db)
+        conversation_id = conv.id
+
     return StreamingResponse(
-        stream_chat(request.messages),
+        stream_and_save(request.messages, conversation_id, db),
         media_type="text/event-stream"
     )

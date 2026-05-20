@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import chat
+from app.api import chat, conversations
 from app.core.config import settings
+from app.core.database import init_db
 
 app = FastAPI(
     title="AIDEN",
@@ -17,7 +18,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup():
+    await init_db()
+
 app.include_router(chat.router, prefix="/api/v1")
+app.include_router(conversations.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

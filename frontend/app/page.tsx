@@ -1,22 +1,72 @@
-
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+
+const API_URL = "http://192.168.2.128:8000";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
 
+interface Conversation {
+  id: string;
+  title: string;
+  updated_at: string;
+}
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/conversations`);
+      const data = await res.json();
+      setConversations(data);
+    } catch (e) {
+      console.error("Error cargando conversaciones", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadConversations();
+  }, [loadConversations]);
+
+  const loadConversation = async (id: string) => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/conversations/${id}/messages`);
+      const data = await res.json();
+      setMessages(data.map((m: { role: string; content: string }) => ({
+        role: m.role,
+        content: m.content,
+      })));
+      setConversationId(id);
+    } catch (e) {
+      console.error("Error cargando mensajes", e);
+    }
+  };
+
+  const newConversation = () => {
+    setMessages([]);
+    setConversationId(null);
+  };
+
+  const deleteConversation = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await fetch(`${API_URL}/api/v1/conversations/${id}`, { method: "DELETE" });
+    if (conversationId === id) newConversation();
+    loadConversations();
+  };
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
@@ -28,14 +78,14 @@ export default function Home() {
     setMessages([...newMessages, { role: "assistant", content: "" }]);
 
     try {
-      const response = await fetch(
-        `http://192.168.2.128:8000/api/v1/chat`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: newMessages }),
-        }
-      );
+      const response = await fetch(`${API_URL}/api/v1/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: newMessages,
+          conversation_id: conversationId,
+        }),
+      });
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -50,17 +100,27 @@ export default function Home() {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (line.startsWith("data: ") && line.trim() !== "data: [DONE]") {
-            const text = line.slice(6).replace(/\\n/g, "\n");
-            setMessages((prev) => {
-              const updated = [...prev];
-              updated[updated.length - 1] = {
-                role: "assistant",
-                content: updated[updated.length - 1].content + text,
-              };
-              return updated;
-            });
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") continue;
+
+          // Capturar conversation_id del servidor
+          if (payload.startsWith("[CONV:")) {
+            const id = payload.slice(6, -1);
+            setConversationId(id);
+            loadConversations();
+            continue;
           }
+
+          const text = payload.replace(/\\n/g, "\n");
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              role: "assistant",
+              content: updated[updated.length - 1].content + text,
+            };
+            return updated;
+          });
         }
       }
     } catch (error) {
@@ -93,103 +153,168 @@ export default function Home() {
       .replace(/\n/g, "<br/>");
   };
 
+  const formatDate = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
+  };
+
   return (
-    <div className="flex flex-col h-screen bg-gray-950 text-gray-100">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-800 bg-gray-900">
-        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-        <h1 className="text-lg font-semibold tracking-wide">AIDEN</h1>
-        <span className="text-xs text-gray-500 ml-auto">
-          Artificial Intelligence Driven ENvironment
-        </span>
-      </div>
+    <div className="flex h-screen bg-gray-950 text-gray-100">
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center gap-4">
-            <div className="text-4xl font-bold text-gray-700">AIDEN</div>
-            <p className="text-gray-500 text-sm max-w-md">
-              Tu asistente virtual inteligente. Preguntame lo que necesites.
-            </p>
-            <div className="grid grid-cols-2 gap-3 mt-4 w-full max-w-lg">
-              {[
-                "¿Qué podés hacer por mí?",
-                "Explicame cómo funciona Docker",
-                "Ayudame a escribir un email formal",
-                "¿Cuáles son las mejores prácticas en Python?"
-              ].map((suggestion) => (
-                <button
-                  key={suggestion}
-                  onClick={() => setInput(suggestion)}
-                  className="text-left px-4 py-3 bg-gray-800 hover:bg-gray-700 rounded-xl text-xs text-gray-400 hover:text-gray-200 transition-colors border border-gray-700"
-                >
-                  {suggestion}
-                </button>
-              ))}
+      {/* Sidebar */}
+      {sidebarOpen && (
+        <div className="w-64 flex flex-col border-r border-gray-800 bg-gray-900">
+          <div className="px-4 py-4 border-b border-gray-800">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-semibold text-sm">AIDEN</span>
             </div>
-          </div>
-        )}
-
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            {msg.role === "assistant" && (
-              <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-xs font-bold mr-2 mt-1 flex-shrink-0">
-                A
-              </div>
-            )}
-            <div
-              className={`max-w-2xl px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                msg.role === "user"
-                  ? "bg-emerald-600 text-white rounded-br-sm"
-                  : "bg-gray-800 text-gray-100 rounded-bl-sm"
-              }`}
+            <button
+              onClick={newConversation}
+              className="w-full px-3 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium transition-colors"
             >
-              {msg.role === "assistant" && msg.content === "" && loading ? (
-                <span className="flex gap-1 items-center text-gray-400">
-                  <span className="animate-bounce">●</span>
-                  <span className="animate-bounce" style={{animationDelay:"0.1s"}}>●</span>
-                  <span className="animate-bounce" style={{animationDelay:"0.2s"}}>●</span>
-                </span>
-              ) : msg.role === "assistant" ? (
-                <div
-                  dangerouslySetInnerHTML={{ __html: formatMessage(msg.content) }}
-                />
-              ) : (
-                msg.content
-              )}
-            </div>
+              + Nueva conversación
+            </button>
           </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
 
-      {/* Input */}
-      <div className="px-4 py-4 border-t border-gray-800 bg-gray-900">
-        <div className="flex gap-3 max-w-4xl mx-auto">
-          <textarea
-            className="flex-1 bg-gray-800 text-gray-100 rounded-xl px-4 py-3 text-sm resize-none outline-none border border-gray-700 focus:border-emerald-500 transition-colors placeholder-gray-500"
-            placeholder="Escribí tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)"
-            rows={1}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={loading}
-          />
-          <button
-            onClick={sendMessage}
-            disabled={loading || !input.trim()}
-            className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-xl text-sm font-medium transition-colors"
-          >
-            {loading ? "..." : "Enviar"}
-          </button>
+          <div className="flex-1 overflow-y-auto py-2">
+            {conversations.length === 0 && (
+              <p className="text-xs text-gray-600 text-center mt-4 px-4">
+                No hay conversaciones aún
+              </p>
+            )}
+            {conversations.map((conv) => (
+              <div
+                key={conv.id}
+                onClick={() => loadConversation(conv.id)}
+                className={`group flex items-center gap-2 px-3 py-2 mx-2 rounded-lg cursor-pointer transition-colors ${
+                  conversationId === conv.id
+                    ? "bg-gray-700"
+                    : "hover:bg-gray-800"
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-300 truncate">{conv.title}</p>
+                  <p className="text-xs text-gray-600">{formatDate(conv.updated_at)}</p>
+                </div>
+                <button
+                  onClick={(e) => deleteConversation(conv.id, e)}
+                  className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition-all text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="px-4 py-3 border-t border-gray-800">
+            <p className="text-xs text-gray-600 text-center">AIDEN v0.1 MVP</p>
+          </div>
         </div>
-        <p className="text-center text-xs text-gray-600 mt-2">
-          AIDEN v0.1 · Semana 1 MVP
-        </p>
+      )}
+
+      {/* Main */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 bg-gray-900">
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="text-gray-500 hover:text-gray-300 transition-colors text-lg"
+          >
+            ☰
+          </button>
+          <span className="text-sm font-medium">
+            {conversationId
+              ? conversations.find((c) => c.id === conversationId)?.title || "Conversación"
+              : "Nueva conversación"}
+          </span>
+          <span className="text-xs text-gray-500 ml-auto">
+            Artificial Intelligence Driven ENvironment by JJRM
+          </span>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-center gap-4">
+              <div className="text-4xl font-bold text-gray-700">AIDEN</div>
+              <p className="text-gray-500 text-sm max-w-md">
+                Tu asistente virtual inteligente. Preguntame lo que necesites.
+              </p>
+              <div className="grid grid-cols-2 gap-3 mt-4 w-full max-w-lg">
+                {[
+                  "¿Qué podés hacer por mí?",
+                  "Explicame cómo funciona Docker",
+                  "Ayudame a escribir un email formal",
+                  "¿Cuáles son las mejores prácticas en Python?",
+                ].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    onClick={() => setInput(suggestion)}
+                    className="text-left px-4 py-3 bg-gray-800 hover:bg-gray-700 rounded-xl text-xs text-gray-400 hover:text-gray-200 transition-colors border border-gray-700"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              {msg.role === "assistant" && (
+                <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-xs font-bold mr-2 mt-1 flex-shrink-0">
+                  A
+                </div>
+              )}
+              <div
+                className={`max-w-2xl px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                  msg.role === "user"
+                    ? "bg-emerald-600 text-white rounded-br-sm"
+                    : "bg-gray-800 text-gray-100 rounded-bl-sm"
+                }`}
+              >
+                {msg.role === "assistant" && msg.content === "" && loading ? (
+                  <span className="flex gap-1 items-center text-gray-400">
+                    <span className="animate-bounce">●</span>
+                    <span className="animate-bounce" style={{ animationDelay: "0.1s" }}>●</span>
+                    <span className="animate-bounce" style={{ animationDelay: "0.2s" }}>●</span>
+                  </span>
+                ) : msg.role === "assistant" ? (
+                  <div dangerouslySetInnerHTML={{ __html: formatMessage(msg.content) }} />
+                ) : (
+                  msg.content
+                )}
+              </div>
+            </div>
+          ))}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Input */}
+        <div className="px-4 py-4 border-t border-gray-800 bg-gray-900">
+          <div className="flex gap-3 max-w-4xl mx-auto">
+            <textarea
+              className="flex-1 bg-gray-800 text-gray-100 rounded-xl px-4 py-3 text-sm resize-none outline-none border border-gray-700 focus:border-emerald-500 transition-colors placeholder-gray-500"
+              placeholder="Escribí tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)"
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={loading}
+            />
+            <button
+              onClick={sendMessage}
+              disabled={loading || !input.trim()}
+              className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-xl text-sm font-medium transition-colors"
+            >
+              {loading ? "..." : "Enviar"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
