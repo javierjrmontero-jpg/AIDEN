@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useRef, useEffect } from "react";
@@ -19,15 +20,12 @@ export default function Home() {
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
-
     const userMessage: Message = { role: "user", content: input };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInput("");
     setLoading(true);
-
-    const assistantMessage: Message = { role: "assistant", content: "" };
-    setMessages([...newMessages, assistantMessage]);
+    setMessages([...newMessages, { role: "assistant", content: "" }]);
 
     try {
       const response = await fetch(
@@ -41,17 +39,19 @@ export default function Home() {
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
+      let buffer = "";
 
       while (reader) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n");
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (line.startsWith("data: ") && line !== "data: [DONE]") {
-            const text = line.replace("data: ", "");
+          if (line.startsWith("data: ") && line.trim() !== "data: [DONE]") {
+            const text = line.slice(6).replace(/\\n/g, "\n");
             setMessages((prev) => {
               const updated = [...prev];
               updated[updated.length - 1] = {
@@ -65,6 +65,14 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Error:", error);
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: "Error al conectar con AIDEN. Intentá de nuevo.",
+        };
+        return updated;
+      });
     } finally {
       setLoading(false);
     }
@@ -75,6 +83,14 @@ export default function Home() {
       e.preventDefault();
       sendMessage();
     }
+  };
+
+  const formatMessage = (content: string) => {
+    return content
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.*?)\*/g, "<em>$1</em>")
+      .replace(/`(.*?)`/g, "<code class='bg-gray-700 px-1 rounded text-emerald-300 text-xs'>$1</code>")
+      .replace(/\n/g, "<br/>");
   };
 
   return (
@@ -96,6 +112,22 @@ export default function Home() {
             <p className="text-gray-500 text-sm max-w-md">
               Tu asistente virtual inteligente. Preguntame lo que necesites.
             </p>
+            <div className="grid grid-cols-2 gap-3 mt-4 w-full max-w-lg">
+              {[
+                "¿Qué podés hacer por mí?",
+                "Explicame cómo funciona Docker",
+                "Ayudame a escribir un email formal",
+                "¿Cuáles son las mejores prácticas en Python?"
+              ].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  onClick={() => setInput(suggestion)}
+                  className="text-left px-4 py-3 bg-gray-800 hover:bg-gray-700 rounded-xl text-xs text-gray-400 hover:text-gray-200 transition-colors border border-gray-700"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -104,15 +136,28 @@ export default function Home() {
             key={i}
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
+            {msg.role === "assistant" && (
+              <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-xs font-bold mr-2 mt-1 flex-shrink-0">
+                A
+              </div>
+            )}
             <div
-              className={`max-w-2xl px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+              className={`max-w-2xl px-4 py-3 rounded-2xl text-sm leading-relaxed ${
                 msg.role === "user"
                   ? "bg-emerald-600 text-white rounded-br-sm"
                   : "bg-gray-800 text-gray-100 rounded-bl-sm"
               }`}
             >
               {msg.role === "assistant" && msg.content === "" && loading ? (
-                <span className="animate-pulse text-gray-400">AIDEN está escribiendo...</span>
+                <span className="flex gap-1 items-center text-gray-400">
+                  <span className="animate-bounce">●</span>
+                  <span className="animate-bounce" style={{animationDelay:"0.1s"}}>●</span>
+                  <span className="animate-bounce" style={{animationDelay:"0.2s"}}>●</span>
+                </span>
+              ) : msg.role === "assistant" ? (
+                <div
+                  dangerouslySetInnerHTML={{ __html: formatMessage(msg.content) }}
+                />
               ) : (
                 msg.content
               )}
@@ -127,7 +172,7 @@ export default function Home() {
         <div className="flex gap-3 max-w-4xl mx-auto">
           <textarea
             className="flex-1 bg-gray-800 text-gray-100 rounded-xl px-4 py-3 text-sm resize-none outline-none border border-gray-700 focus:border-emerald-500 transition-colors placeholder-gray-500"
-            placeholder="Escribí tu mensaje... (Enter para enviar)"
+            placeholder="Escribí tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)"
             rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -142,6 +187,9 @@ export default function Home() {
             {loading ? "..." : "Enviar"}
           </button>
         </div>
+        <p className="text-center text-xs text-gray-600 mt-2">
+          AIDEN v0.1 · Semana 1 MVP
+        </p>
       </div>
     </div>
   );
