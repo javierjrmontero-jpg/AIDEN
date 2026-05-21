@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
+import MessageActions from "@/components/MessageActions";
 
 const API_URL = "http://192.168.2.128:8000";
 
@@ -336,7 +337,7 @@ export default function Home() {
                 </div>
               )}
               <div
-                className={`max-w-2xl px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                className={`group max-w-2xl px-4 py-3 rounded-2xl text-sm leading-relaxed ${
                   msg.role === "user"
                     ? "bg-emerald-600 text-white rounded-br-sm"
                     : "bg-gray-800 text-gray-100 rounded-bl-sm"
@@ -349,7 +350,10 @@ export default function Home() {
                     <span className="animate-bounce" style={{ animationDelay: "0.2s" }}>●</span>
                   </span>
                 ) : msg.role === "assistant" ? (
-                  <MarkdownRenderer content={msg.content} />
+                  <div className="w-full">
+                    <MarkdownRenderer content={msg.content} />
+                    {msg.content && token && <MessageActions content={msg.content} token={token} />}
+                  </div>
                 ) : (
                   msg.content
                 )}
