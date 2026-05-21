@@ -149,7 +149,8 @@ export default function Home() {
             continue;
           }
 
-          const text = payload.replace(/\\n/g, "\n");
+          let text;
+          try { text = JSON.parse(payload); } catch { text = payload; }
           setMessages((prev) => {
             const updated = [...prev];
             updated[updated.length - 1] = {
@@ -246,6 +247,7 @@ export default function Home() {
             <button onClick={() => router.push("/profile")} className="text-xs text-gray-300 hover:text-emerald-400 transition-colors truncate text-left w-full">{user.name}</button>
             <p className="text-xs text-gray-600 truncate">{user.email}</p>
             <button onClick={() => router.push("/profile")} className="text-xs text-emerald-600 hover:text-emerald-400 transition-colors mt-1">Editar perfil →</button>
+            <button onClick={() => router.push("/documents")} className="text-xs text-gray-500 hover:text-emerald-400 transition-colors mt-1">Documentos 📄</button>
           </div>
         </div>
       )}
