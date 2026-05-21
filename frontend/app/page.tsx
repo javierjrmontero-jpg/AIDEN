@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 
 const API_URL = "http://192.168.2.128:8000";
 
@@ -16,6 +17,9 @@ interface Conversation {
 }
 
 export default function Home() {
+  const router = useRouter();
+  const [user, setUser] = useState<{name: string; email: string} | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,26 +29,55 @@ export default function Home() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const t = localStorage.getItem("mate_token");
+    const u = localStorage.getItem("mate_user");
+    if (!t || !u) {
+      router.push("/login");
+      return;
+    }
+    setToken(t);
+    setUser(JSON.parse(u));
+  }, [router]);
+
+  const logout = () => {
+    localStorage.removeItem("mate_token");
+    localStorage.removeItem("mate_user");
+    router.push("/login");
+  };
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const authHeaders = useCallback(() => ({
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${token}`
+  }), [token]);
+
   const loadConversations = useCallback(async () => {
+    if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/v1/conversations`);
+      const res = await fetch(`${API_URL}/api/v1/conversations`, {
+        headers: authHeaders()
+      });
+      if (res.status === 401) { logout(); return; }
       const data = await res.json();
       setConversations(data);
     } catch (e) {
       console.error("Error cargando conversaciones", e);
     }
-  }, []);
+  }, [token, authHeaders]);
 
   useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
+    if (token) loadConversations();
+  }, [token, loadConversations]);
 
   const loadConversation = async (id: string) => {
+    if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/v1/conversations/${id}/messages`);
+      const res = await fetch(`${API_URL}/api/v1/conversations/${id}/messages`, {
+        headers: authHeaders()
+      });
       const data = await res.json();
       setMessages(data.map((m: { role: string; content: string }) => ({
         role: m.role,
@@ -63,13 +96,16 @@ export default function Home() {
 
   const deleteConversation = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    await fetch(`${API_URL}/api/v1/conversations/${id}`, { method: "DELETE" });
+    await fetch(`${API_URL}/api/v1/conversations/${id}`, {
+      method: "DELETE",
+      headers: authHeaders()
+    });
     if (conversationId === id) newConversation();
     loadConversations();
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || loading || !token) return;
     const userMessage: Message = { role: "user", content: input };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
@@ -80,12 +116,14 @@ export default function Home() {
     try {
       const response = await fetch(`${API_URL}/api/v1/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({
           messages: newMessages,
           conversation_id: conversationId,
         }),
       });
+
+      if (response.status === 401) { logout(); return; }
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -104,7 +142,6 @@ export default function Home() {
           const payload = line.slice(6).trim();
           if (payload === "[DONE]") continue;
 
-          // Capturar conversation_id del servidor
           if (payload.startsWith("[CONV:")) {
             const id = payload.slice(6, -1);
             setConversationId(id);
@@ -158,10 +195,10 @@ export default function Home() {
     return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
   };
 
+  if (!user) return null;
+
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100">
-
-      {/* Sidebar */}
       {sidebarOpen && (
         <div className="w-64 flex flex-col border-r border-gray-800 bg-gray-900">
           <div className="px-4 py-4 border-b border-gray-800">
@@ -188,9 +225,7 @@ export default function Home() {
                 key={conv.id}
                 onClick={() => loadConversation(conv.id)}
                 className={`group flex items-center gap-2 px-3 py-2 mx-2 rounded-lg cursor-pointer transition-colors ${
-                  conversationId === conv.id
-                    ? "bg-gray-700"
-                    : "hover:bg-gray-800"
+                  conversationId === conv.id ? "bg-gray-700" : "hover:bg-gray-800"
                 }`}
               >
                 <div className="flex-1 min-w-0">
@@ -208,14 +243,13 @@ export default function Home() {
           </div>
 
           <div className="px-4 py-3 border-t border-gray-800">
-            <p className="text-xs text-gray-600 text-center">MATE v0.1 MVP</p>
+            <p className="text-xs text-gray-500 truncate">{user.name}</p>
+            <p className="text-xs text-gray-600 truncate">{user.email}</p>
           </div>
         </div>
       )}
 
-      {/* Main */}
       <div className="flex-1 flex flex-col">
-        {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 bg-gray-900">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -228,18 +262,26 @@ export default function Home() {
               ? conversations.find((c) => c.id === conversationId)?.title || "Conversación"
               : "Nueva conversación"}
           </span>
-          <span className="text-xs text-gray-500 ml-auto">
-            Motor de Asistencia Técnica e Inteligencia by JJRM
-          </span>
+          <div className="flex items-center gap-3 ml-auto">
+            <span className="text-xs text-gray-500">
+              Motor de Asistencia Técnica e Inteligencia by JJRM
+            </span>
+            <span className="text-xs text-emerald-400 font-medium">{user.name}</span>
+            <button
+              onClick={logout}
+              className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+            >
+              Salir
+            </button>
+          </div>
         </div>
 
-        {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center gap-4">
               <div className="text-4xl font-bold text-gray-700">MATE</div>
               <p className="text-gray-500 text-sm max-w-md">
-                Tu asistente virtual inteligente. Preguntame lo que necesites.
+                Hola {user.name.split(" ")[0]}, ¿en qué puedo ayudarte hoy?
               </p>
               <div className="grid grid-cols-2 gap-3 mt-4 w-full max-w-lg">
                 {[
@@ -267,7 +309,7 @@ export default function Home() {
             >
               {msg.role === "assistant" && (
                 <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-xs font-bold mr-2 mt-1 flex-shrink-0">
-                  A
+                  M
                 </div>
               )}
               <div
@@ -294,7 +336,6 @@ export default function Home() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input */}
         <div className="px-4 py-4 border-t border-gray-800 bg-gray-900">
           <div className="flex gap-3 max-w-4xl mx-auto">
             <textarea

@@ -9,6 +9,7 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, nullable=False, index=True)
     title = Column(String(200), nullable=False, default="Nueva conversación")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

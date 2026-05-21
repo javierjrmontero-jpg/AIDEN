@@ -1,12 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import chat, conversations
+from app.api import chat, conversations, auth
 from app.core.config import settings
 from app.core.database import init_db
 
 app = FastAPI(
     title="MATE",
-    description="Artificial Intelligence Driven ENvironment",
+    description="Motor de Asistencia Técnica e Inteligencia — by JJRM",
     version="0.1.0"
 )
 
@@ -22,12 +22,13 @@ app.add_middleware(
 async def startup():
     await init_db()
 
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(conversations.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
-    return {"status": "online", "assistant": settings.ASSISTANT_NAME}
+    return {"status": "online", "assistant": "MATE", "author": "JJRM"}
 
 @app.get("/health")
 async def health():

@@ -4,9 +4,10 @@ from app.models.conversation import Conversation, Message
 from datetime import datetime
 import uuid
 
-async def create_conversation(db: AsyncSession, title: str = "Nueva conversación") -> Conversation:
+async def create_conversation(db: AsyncSession, user_id: str, title: str = "Nueva conversación") -> Conversation:
     conv = Conversation(
         id=str(uuid.uuid4()),
+        user_id=user_id,
         title=title,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow()
@@ -16,13 +17,23 @@ async def create_conversation(db: AsyncSession, title: str = "Nueva conversació
     await db.refresh(conv)
     return conv
 
-async def get_conversations(db: AsyncSession) -> list:
+async def get_conversations(db: AsyncSession, user_id: str) -> list:
     result = await db.execute(
-        select(Conversation).order_by(Conversation.updated_at.desc())
+        select(Conversation)
+        .where(Conversation.user_id == user_id)
+        .order_by(Conversation.updated_at.desc())
     )
     return result.scalars().all()
 
-async def get_messages(db: AsyncSession, conversation_id: str) -> list:
+async def get_messages(db: AsyncSession, conversation_id: str, user_id: str) -> list:
+    # Verificar que la conversación pertenece al usuario
+    conv = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conversation_id)
+        .where(Conversation.user_id == user_id)
+    )
+    if not conv.scalar_one_or_none():
+        return []
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
@@ -39,17 +50,23 @@ async def save_message(db: AsyncSession, conversation_id: str, role: str, conten
         order_index=order
     )
     db.add(msg)
-    # Actualizar timestamp de conversación
     conv = await db.get(Conversation, conversation_id)
     if conv:
         conv.updated_at = datetime.utcnow()
-        # Generar título automático del primer mensaje
         if order == 0 and role == "user":
             conv.title = content[:60] + ("..." if len(content) > 60 else "")
     await db.commit()
     return msg
 
-async def delete_conversation(db: AsyncSession, conversation_id: str):
+async def delete_conversation(db: AsyncSession, conversation_id: str, user_id: str):
+    # Verificar que pertenece al usuario antes de borrar
+    conv = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conversation_id)
+        .where(Conversation.user_id == user_id)
+    )
+    if not conv.scalar_one_or_none():
+        return
     await db.execute(delete(Message).where(Message.conversation_id == conversation_id))
     await db.execute(delete(Conversation).where(Conversation.id == conversation_id))
     await db.commit()
