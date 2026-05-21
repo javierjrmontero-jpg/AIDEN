@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
-const API_URL = "http://mate.local:8000";
+const API_URL = "";
 
 interface Document {
   id: string;

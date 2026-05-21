@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import MessageActions from "@/components/MessageActions";
 
-const API_URL = "http://mate.local:8000";
+const API_URL = "";
 
 interface Message {
   role: "user" | "assistant";

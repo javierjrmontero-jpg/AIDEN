@@ -24,3 +24,15 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: mate-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
