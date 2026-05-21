@@ -21,14 +21,14 @@ class ChatRequest(BaseModel):
     messages: List[Message]
     conversation_id: Optional[str] = None
 
-async def stream_and_save(messages, conversation_id, user_id, db):
+async def stream_and_save(messages, conversation_id, user, db):
     full_response = ""
     order = len(messages)
 
     user_msg = messages[-1]
     await save_message(db, conversation_id, user_msg.role, user_msg.content, order - 1)
 
-    async for chunk in stream_chat(messages):
+    async for chunk in stream_chat(messages, user):
         if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
             text = chunk[6:].replace("\\n", "\n").rstrip("\n\n")
             full_response += text
@@ -51,6 +51,6 @@ async def chat(
         conversation_id = conv.id
 
     return StreamingResponse(
-        stream_and_save(request.messages, conversation_id, current_user.id, db),
+        stream_and_save(request.messages, conversation_id, current_user, db),
         media_type="text/event-stream"
     )

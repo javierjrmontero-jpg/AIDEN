@@ -243,8 +243,9 @@ export default function Home() {
           </div>
 
           <div className="px-4 py-3 border-t border-gray-800">
-            <p className="text-xs text-gray-500 truncate">{user.name}</p>
+            <button onClick={() => router.push("/profile")} className="text-xs text-gray-300 hover:text-emerald-400 transition-colors truncate text-left w-full">{user.name}</button>
             <p className="text-xs text-gray-600 truncate">{user.email}</p>
+            <button onClick={() => router.push("/profile")} className="text-xs text-emerald-600 hover:text-emerald-400 transition-colors mt-1">Editar perfil →</button>
           </div>
         </div>
       )}
