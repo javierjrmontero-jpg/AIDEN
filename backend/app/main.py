@@ -13,6 +13,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://mate.local",
         "http://mate.local",
         "http://mate.local:3000",
         "http://localhost:3000"

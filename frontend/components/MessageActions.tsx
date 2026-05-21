@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 
-const API_URL = "";
-
 interface Props {
   content: string;
   token: string;
@@ -13,23 +11,9 @@ export default function MessageActions({ content, token }: Props) {
   const [downloading, setDownloading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const copyToClipboard = () => {
-    // Fallback para HTTP (sin HTTPS navigator.clipboard no funciona)
+  const copyToClipboard = async () => {
     try {
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(content);
-      } else {
-        // Método alternativo compatible con HTTP
-        const textarea = document.createElement("textarea");
-        textarea.value = content;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
+      await navigator.clipboard.writeText(content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
@@ -40,7 +24,7 @@ export default function MessageActions({ content, token }: Props) {
   const download = async (format: string) => {
     setDownloading(true);
     try {
-      const res = await fetch(`${API_URL}/api/v1/generate/document`, {
+      const res = await fetch(`/api/v1/generate/document`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
