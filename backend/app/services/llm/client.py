@@ -20,6 +20,9 @@ SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un a
 - Contexto actual: {user_context}
 - Preferencias: {user_preferences}
 
+## Lo que recordás del usuario (memorias previas)
+{memories}
+
 ## Documentos del usuario (RAG)
 {rag_context}
 
@@ -29,9 +32,9 @@ SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un a
 ## Tu forma de trabajar
 - Respondés en español por defecto
 - Sos técnico, preciso y útil
+- Usás las memorias previas para personalizar respuestas sin que el usuario tenga que repetir contexto
 - Si hay documentos relevantes, los usás y citás el archivo
 - Si hay resultados web, los usás e indicás la fuente con la URL
-- Si no hay información suficiente, lo decís claramente
 - Nunca inventás información que no tenés
 - Usás formato Markdown: **negrita**, *cursiva*, listas, tablas, código
 - Fecha y hora actual: {fecha}"""
@@ -52,10 +55,19 @@ def should_search_web(query: str) -> bool:
 
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-async def stream_chat(messages: list, user=None):
+async def stream_chat(messages: list, user=None, db=None):
     query = messages[-1].content
 
-    # RAG sobre documentos del usuario
+    # Memorias del usuario
+    memories_text = "No hay memorias previas."
+    if user and db:
+        try:
+            from app.services.memory.service import format_memories_for_prompt
+            memories_text = await format_memories_for_prompt(db, user.id)
+        except Exception as e:
+            logger.error(f"Error cargando memorias: {e}")
+
+    # RAG sobre documentos
     rag_context = "No hay documentos cargados."
     try:
         if user:
@@ -68,19 +80,14 @@ async def stream_chat(messages: list, user=None):
     except Exception as e:
         logger.error(f"Error en RAG: {e}")
 
-    # Búsqueda web si es necesario
+    # Búsqueda web
     web_context = "No se realizó búsqueda web."
-    searching_web = should_search_web(query)
-
-    if searching_web:
-        # Notificar al frontend que estamos buscando
+    if should_search_web(query):
         yield f"data: {json.dumps('[STATUS:searching]')}\n\n"
         try:
-            logger.info(f"Activando búsqueda web para: '{query}'")
             web_results = await web_search(query)
             if web_results:
                 web_context = format_results_for_llm(web_results)
-                logger.info(f"Búsqueda web completada: {len(web_results)} resultados")
             yield f"data: {json.dumps('[STATUS:done]')}\n\n"
         except Exception as e:
             logger.error(f"Error en búsqueda web: {e}")
@@ -91,6 +98,7 @@ async def stream_chat(messages: list, user=None):
         user_role=user.role or "No especificado" if user else "No especificado",
         user_context=user.context or "No especificado" if user else "No especificado",
         user_preferences=user.preferences or "No especificado" if user else "No especificado",
+        memories=memories_text,
         rag_context=rag_context,
         web_context=web_context,
         fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
