@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const API_URL = "http://192.168.2.128:8000";
+const API_URL = "http://mate.local:8000";
 
 interface Props {
   content: string;
