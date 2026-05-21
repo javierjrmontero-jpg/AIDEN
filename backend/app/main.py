@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import chat, conversations, auth, documents, generate, memories
+from app.api import chat, conversations, auth, documents, generate, memories, sandbox
 from app.core.config import settings
 from app.core.database import init_db
 
@@ -15,7 +15,6 @@ app.add_middleware(
     allow_origins=[
         "http://mate.local",
         "http://mate.local:3000",
-        "http://192.168.2.128:3000",
         "http://localhost:3000"
     ],
     allow_credentials=True,
@@ -33,6 +32,7 @@ app.include_router(conversations.router, prefix="/api/v1")
 app.include_router(documents.router, prefix="/api/v1")
 app.include_router(generate.router, prefix="/api/v1")
 app.include_router(memories.router, prefix="/api/v1")
+app.include_router(sandbox.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

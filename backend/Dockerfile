@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     libgl1 \
     libglib2.0-0 \
+    curl \
+    && curl -fsSL https://get.docker.com | sh \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -351,7 +351,7 @@ export default function Home() {
                   </span>
                 ) : msg.role === "assistant" ? (
                   <div className="w-full">
-                    <MarkdownRenderer content={msg.content} />
+                    <MarkdownRenderer content={msg.content} token={token ?? undefined} />
                     {msg.content && token && <MessageActions content={msg.content} token={token} />}
                   </div>
                 ) : (

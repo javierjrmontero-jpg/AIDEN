@@ -1,13 +1,17 @@
+"use client";
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import CodeExecutor from "./CodeExecutor";
 
 interface Props {
   content: string;
+  token?: string;
 }
 
-export default function MarkdownRenderer({ content }: Props) {
+export default function MarkdownRenderer({ content, token }: Props) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -15,6 +19,9 @@ export default function MarkdownRenderer({ content }: Props) {
         code({ className, children, ...props }: any) {
           const match = /language-(\w+)/.exec(className || "");
           const isInline = !match;
+          const language = match ? match[1] : "";
+          const codeString = String(children).replace(/\n$/, "");
+
           return isInline ? (
             <code className="bg-gray-700 text-emerald-300 px-1.5 py-0.5 rounded text-xs font-mono" {...props}>
               {children}
@@ -22,9 +29,19 @@ export default function MarkdownRenderer({ content }: Props) {
           ) : (
             <div className="my-3 rounded-xl overflow-hidden border border-gray-700">
               <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
-                <span className="text-xs text-gray-400 font-mono">{match[1]}</span>
+                <span className="text-xs text-gray-400 font-mono">{language}</span>
                 <button
-                  onClick={() => navigator.clipboard.writeText(String(children))}
+                  onClick={() => {
+                    const textarea = document.createElement("textarea");
+                    textarea.value = codeString;
+                    textarea.style.position = "fixed";
+                    textarea.style.opacity = "0";
+                    document.body.appendChild(textarea);
+                    textarea.focus();
+                    textarea.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(textarea);
+                  }}
                   className="text-xs text-gray-500 hover:text-emerald-400 transition-colors"
                 >
                   Copiar
@@ -32,13 +49,18 @@ export default function MarkdownRenderer({ content }: Props) {
               </div>
               <SyntaxHighlighter
                 style={vscDarkPlus}
-                language={match[1]}
+                language={language}
                 PreTag="div"
                 customStyle={{ margin: 0, borderRadius: 0, background: "#1a1a2e", fontSize: "0.8rem" }}
                 {...props}
               >
-                {String(children).replace(/\n$/, "")}
+                {codeString}
               </SyntaxHighlighter>
+              {token && (
+                <div className="px-4 py-2 bg-gray-900 border-t border-gray-700">
+                  <CodeExecutor code={codeString} language={language} token={token} />
+                </div>
+              )}
             </div>
           );
         },
