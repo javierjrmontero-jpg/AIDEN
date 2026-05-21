@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { useRouter } from "next/navigation";
 
 const API_URL = "http://192.168.2.128:8000";
@@ -329,7 +330,7 @@ export default function Home() {
                     <span className="animate-bounce" style={{ animationDelay: "0.2s" }}>●</span>
                   </span>
                 ) : msg.role === "assistant" ? (
-                  <div dangerouslySetInnerHTML={{ __html: formatMessage(msg.content) }} />
+                  <MarkdownRenderer content={msg.content} />
                 ) : (
                   msg.content
                 )}
