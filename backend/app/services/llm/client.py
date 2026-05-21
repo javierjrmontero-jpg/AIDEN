@@ -70,15 +70,21 @@ async def stream_chat(messages: list, user=None):
 
     # Búsqueda web si es necesario
     web_context = "No se realizó búsqueda web."
-    try:
-        if should_search_web(query):
+    searching_web = should_search_web(query)
+
+    if searching_web:
+        # Notificar al frontend que estamos buscando
+        yield f"data: {json.dumps('[STATUS:searching]')}\n\n"
+        try:
             logger.info(f"Activando búsqueda web para: '{query}'")
             web_results = await web_search(query)
             if web_results:
                 web_context = format_results_for_llm(web_results)
                 logger.info(f"Búsqueda web completada: {len(web_results)} resultados")
-    except Exception as e:
-        logger.error(f"Error en búsqueda web: {e}")
+            yield f"data: {json.dumps('[STATUS:done]')}\n\n"
+        except Exception as e:
+            logger.error(f"Error en búsqueda web: {e}")
+            yield f"data: {json.dumps('[STATUS:done]')}\n\n"
 
     system = SYSTEM_PROMPT.format(
         user_name=user.name if user else "Usuario",

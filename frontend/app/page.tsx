@@ -1,14 +1,15 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { useRouter } from "next/navigation";
+import MarkdownRenderer from "@/components/MarkdownRenderer";
 
 const API_URL = "http://192.168.2.128:8000";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  searching?: boolean;
 }
 
 interface Conversation {
@@ -24,6 +25,7 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -32,10 +34,7 @@ export default function Home() {
   useEffect(() => {
     const t = localStorage.getItem("mate_token");
     const u = localStorage.getItem("mate_user");
-    if (!t || !u) {
-      router.push("/login");
-      return;
-    }
+    if (!t || !u) { router.push("/login"); return; }
     setToken(t);
     setUser(JSON.parse(u));
   }, [router]);
@@ -48,7 +47,7 @@ export default function Home() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, searching]);
 
   const authHeaders = useCallback(() => ({
     "Content-Type": "application/json",
@@ -112,6 +111,7 @@ export default function Home() {
     setMessages(newMessages);
     setInput("");
     setLoading(true);
+    setSearching(false);
     setMessages([...newMessages, { role: "assistant", content: "" }]);
 
     try {
@@ -143,6 +143,9 @@ export default function Home() {
           const payload = line.slice(6).trim();
           if (payload === "[DONE]") continue;
 
+          let text: string;
+          try { text = JSON.parse(payload); } catch { text = payload; }
+
           if (payload.startsWith("[CONV:")) {
             const id = payload.slice(6, -1);
             setConversationId(id);
@@ -150,8 +153,16 @@ export default function Home() {
             continue;
           }
 
-          let text;
-          try { text = JSON.parse(payload); } catch { text = payload; }
+          if (text === "[STATUS:searching]") {
+            setSearching(true);
+            continue;
+          }
+
+          if (text === "[STATUS:done]") {
+            setSearching(false);
+            continue;
+          }
+
           setMessages((prev) => {
             const updated = [...prev];
             updated[updated.length - 1] = {
@@ -174,6 +185,7 @@ export default function Home() {
       });
     } finally {
       setLoading(false);
+      setSearching(false);
     }
   };
 
@@ -182,14 +194,6 @@ export default function Home() {
       e.preventDefault();
       sendMessage();
     }
-  };
-
-  const formatMessage = (content: string) => {
-    return content
-      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\*(.*?)\*/g, "<em>$1</em>")
-      .replace(/`(.*?)`/g, "<code class='bg-gray-700 px-1 rounded text-emerald-300 text-xs'>$1</code>")
-      .replace(/\n/g, "<br/>");
   };
 
   const formatDate = (iso: string) => {
@@ -245,10 +249,25 @@ export default function Home() {
           </div>
 
           <div className="px-4 py-3 border-t border-gray-800">
-            <button onClick={() => router.push("/profile")} className="text-xs text-gray-300 hover:text-emerald-400 transition-colors truncate text-left w-full">{user.name}</button>
+            <button
+              onClick={() => router.push("/profile")}
+              className="text-xs text-gray-300 hover:text-emerald-400 transition-colors truncate text-left w-full"
+            >
+              {user.name}
+            </button>
             <p className="text-xs text-gray-600 truncate">{user.email}</p>
-            <button onClick={() => router.push("/profile")} className="text-xs text-emerald-600 hover:text-emerald-400 transition-colors mt-1">Editar perfil →</button>
-            <button onClick={() => router.push("/documents")} className="text-xs text-gray-500 hover:text-emerald-400 transition-colors mt-1">Documentos 📄</button>
+            <button
+              onClick={() => router.push("/profile")}
+              className="text-xs text-emerald-600 hover:text-emerald-400 transition-colors mt-1"
+            >
+              Editar perfil →
+            </button>
+            <button
+              onClick={() => router.push("/documents")}
+              className="text-xs text-gray-500 hover:text-emerald-400 transition-colors mt-1 block"
+            >
+              Documentos 📄
+            </button>
           </div>
         </div>
       )}
@@ -290,7 +309,7 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-3 mt-4 w-full max-w-lg">
                 {[
                   "¿Qué podés hacer por mí?",
-                  "Explicame cómo funciona Docker",
+                  "Últimas noticias sobre IA hoy",
                   "Ayudame a escribir un email formal",
                   "¿Cuáles son las mejores prácticas en Python?",
                 ].map((suggestion) => (
@@ -337,6 +356,21 @@ export default function Home() {
               </div>
             </div>
           ))}
+
+          {/* Indicador de búsqueda web */}
+          {searching && (
+            <div className="flex justify-start">
+              <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-xs font-bold mr-2 mt-1 flex-shrink-0">
+                M
+              </div>
+              <div className="bg-gray-800 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
+                <span className="text-xs text-gray-400">Buscando en la web...</span>
+                <span className="text-xs">🌐</span>
+              </div>
+            </div>
+          )}
+
           <div ref={bottomRef} />
         </div>
 
@@ -359,6 +393,9 @@ export default function Home() {
               {loading ? "..." : "Enviar"}
             </button>
           </div>
+          <p className="text-center text-xs text-gray-600 mt-2">
+            MATE · Motor de Asistencia Técnica e Inteligencia by JJRM
+          </p>
         </div>
       </div>
     </div>
