@@ -5,7 +5,7 @@ from app.core.config import settings
 from app.core.database import init_db
 
 app = FastAPI(
-    title="AIDEN",
+    title="MATE",
     description="Artificial Intelligence Driven ENvironment",
     version="0.1.0"
 )

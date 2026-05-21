@@ -129,7 +129,7 @@ export default function Home() {
         const updated = [...prev];
         updated[updated.length - 1] = {
           role: "assistant",
-          content: "Error al conectar con AIDEN. Intentá de nuevo.",
+          content: "Error al conectar con MATE. Intentá de nuevo.",
         };
         return updated;
       });
@@ -167,7 +167,7 @@ export default function Home() {
           <div className="px-4 py-4 border-b border-gray-800">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="font-semibold text-sm">AIDEN</span>
+              <span className="font-semibold text-sm">MATE</span>
             </div>
             <button
               onClick={newConversation}
@@ -208,7 +208,7 @@ export default function Home() {
           </div>
 
           <div className="px-4 py-3 border-t border-gray-800">
-            <p className="text-xs text-gray-600 text-center">AIDEN v0.1 MVP</p>
+            <p className="text-xs text-gray-600 text-center">MATE v0.1 MVP</p>
           </div>
         </div>
       )}
@@ -229,7 +229,7 @@ export default function Home() {
               : "Nueva conversación"}
           </span>
           <span className="text-xs text-gray-500 ml-auto">
-            Artificial Intelligence Driven ENvironment by JJRM
+            Motor de Asistencia Técnica e Inteligencia by JJRM
           </span>
         </div>
 
@@ -237,7 +237,7 @@ export default function Home() {
         <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center gap-4">
-              <div className="text-4xl font-bold text-gray-700">AIDEN</div>
+              <div className="text-4xl font-bold text-gray-700">MATE</div>
               <p className="text-gray-500 text-sm max-w-md">
                 Tu asistente virtual inteligente. Preguntame lo que necesites.
               </p>
