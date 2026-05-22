@@ -5,8 +5,9 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
+BRAVE_COST_PER_1000 = 5.0  # USD por 1000 requests
 
-async def web_search(query: str, count: int = 5) -> list:
+async def web_search(query: str, count: int = 5, user_id: str = None, db=None) -> list:
     if not settings.BRAVE_SEARCH_API_KEY:
         return []
 
@@ -41,6 +42,25 @@ async def web_search(query: str, count: int = 5) -> list:
                 })
 
             logger.info(f"Búsqueda web: '{query}' → {len(results)} resultados")
+
+            # Registrar uso si se pasó db y user_id
+            if db and user_id:
+                try:
+                    from app.models.usage import SearchUsage
+                    import uuid
+                    from datetime import datetime
+                    usage = SearchUsage(
+                        id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        query=query,
+                        results_count=len(results),
+                        created_at=datetime.utcnow()
+                    )
+                    db.add(usage)
+                    await db.commit()
+                except Exception as e:
+                    logger.error(f"Error registrando uso: {e}")
+
             return results
 
     except Exception as e:

@@ -249,8 +249,48 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="px-4 py-3 border-t border-gray-800">
+<div className="px-4 py-3 border-t border-gray-800 space-y-1">
             <button
+              onClick={() => router.push("/profile")}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors text-left"
+            >
+              <div className="w-6 h-6 rounded-full bg-emerald-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                {user.name[0].toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-gray-300 truncate">{user.name}</p>
+                <p className="text-xs text-gray-600 truncate">{user.email}</p>
+              </div>
+            </button>
+            <div className="grid grid-cols-3 gap-1 pt-1">
+              <button onClick={() => router.push("/profile")}
+                className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+                <span className="text-sm">👤</span>
+                <span className="text-xs text-gray-500">Perfil</span>
+              </button>
+              <button onClick={() => router.push("/documents")}
+                className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+                <span className="text-sm">📄</span>
+                <span className="text-xs text-gray-500">Docs</span>
+              </button>
+              <button onClick={() => router.push("/memories")}
+                className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+                <span className="text-sm">🧠</span>
+                <span className="text-xs text-gray-500">Memoria</span>
+              </button>
+            </div>
+            <button onClick={() => router.push("/admin")}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-emerald-900 transition-colors">
+              <span className="text-sm">⚙️</span>
+              <span className="text-xs text-gray-400">Administración</span>
+            </button>
+            <button onClick={logout}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-red-900/30 transition-colors">
+              <span className="text-sm">🚪</span>
+              <span className="text-xs text-gray-500 hover:text-red-400">Salir</span>
+            </button>
+          </div>
+         <button
               onClick={() => router.push("/profile")}
               className="text-xs text-gray-300 hover:text-emerald-400 transition-colors truncate text-left w-full"
             >
@@ -263,7 +303,10 @@ export default function Home() {
             >
               Editar perfil →
             </button>
-            <button
+<button onClick={() => router.push("/admin")} className="text-xs text-gray-500 hover:text-emerald-400 transition-colors mt-1 block">
+              ⚙️ Admin
+            </button>            
+<button
               onClick={() => router.push("/documents")}
               className="text-xs text-gray-500 hover:text-emerald-400 transition-colors mt-1 block"
             >
