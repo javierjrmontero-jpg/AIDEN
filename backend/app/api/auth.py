@@ -46,6 +46,8 @@ class ProfileUpdate(BaseModel):
     role: str = ""
     context: str = ""
     preferences: str = ""
+    language: str = "es"
+
 
 @router.get("/auth/profile")
 async def get_profile(current_user: User = Depends(get_current_user)):
@@ -54,7 +56,8 @@ async def get_profile(current_user: User = Depends(get_current_user)):
         "email": current_user.email,
         "role": current_user.role or "",
         "context": current_user.context or "",
-        "preferences": current_user.preferences or ""
+        "preferences": current_user.preferences or "",
+        "language": current_user.language or "es"
     }
 
 @router.put("/auth/profile")
@@ -66,5 +69,6 @@ async def update_profile(
     current_user.role = request.role
     current_user.context = request.context
     current_user.preferences = request.preferences
+    current_user.language = request.language
     await db.commit()
     return {"status": "updated"}

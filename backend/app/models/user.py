@@ -17,3 +17,4 @@ class User(Base):
     role = Column(String(200), nullable=True)
     context = Column(Text, nullable=True)
     preferences = Column(Text, nullable=True)
+    language = Column(String(10), default="es")

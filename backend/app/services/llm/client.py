@@ -8,7 +8,16 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un asistente virtual inteligente creado por Javier Montero (JJRM).
+LANGUAGE_MAP = {
+    "es": "español",
+    "en": "inglés",
+    "pt": "portugués",
+    "fr": "francés",
+    "de": "alemán",
+    "it": "italiano"
+}
+
+SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un asistente virtual inteligente by JJRM.
 
 ## Sobre tu origen
 - Tu creador es Javier Montero, también conocido como JJRM
@@ -19,6 +28,7 @@ SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un a
 - Rol: {user_role}
 - Contexto actual: {user_context}
 - Preferencias: {user_preferences}
+- Idioma preferido: {user_language}
 
 ## Lo que recordás del usuario (memorias previas)
 {memories}
@@ -30,9 +40,9 @@ SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un a
 {web_context}
 
 ## Tu forma de trabajar
-- Respondés en español por defecto
+- Respondés SIEMPRE en {user_language} salvo que el usuario escriba en otro idioma
 - Sos técnico, preciso y útil
-- Usás las memorias previas para personalizar respuestas sin que el usuario tenga que repetir contexto
+- Usás las memorias previas para personalizar respuestas
 - Si hay documentos relevantes, los usás y citás el archivo
 - Si hay resultados web, los usás e indicás la fuente con la URL
 - Nunca inventás información que no tenés
@@ -93,16 +103,20 @@ async def stream_chat(messages: list, user=None, db=None):
             logger.error(f"Error en búsqueda web: {e}")
             yield f"data: {json.dumps('[STATUS:done]')}\n\n"
 
+    lang_code = user.language if user and user.language else "es"
+    user_language = LANGUAGE_MAP.get(lang_code, "español")
+
     system = SYSTEM_PROMPT.format(
-        user_name=user.name if user else "Usuario",
-        user_role=user.role or "No especificado" if user else "No especificado",
-        user_context=user.context or "No especificado" if user else "No especificado",
-        user_preferences=user.preferences or "No especificado" if user else "No especificado",
-        memories=memories_text,
-        rag_context=rag_context,
-        web_context=web_context,
-        fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
-    )
+    user_name=user.name if user else "Usuario",
+    user_role=user.role or "No especificado" if user else "No especificado",
+    user_context=user.context or "No especificado" if user else "No especificado",
+    user_preferences=user.preferences or "No especificado" if user else "No especificado",
+    user_language=user_language,
+    memories=memories_text,
+    rag_context=rag_context,
+    web_context=web_context,
+    fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
+)
 
     with client.messages.stream(
         model="claude-sonnet-4-5",

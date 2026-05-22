@@ -3,8 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-const API_URL = "";
-
 export default function Profile() {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -12,6 +10,7 @@ export default function Profile() {
   const [role, setRole] = useState("");
   const [context, setContext] = useState("");
   const [preferences, setPreferences] = useState("");
+  const [language, setLanguage] = useState("es");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -22,8 +21,7 @@ export default function Profile() {
     setToken(t);
     setUser(JSON.parse(u));
 
-    // Cargar perfil actual
-    fetch(`${API_URL}/api/v1/auth/profile`, {
+    fetch(`/api/v1/auth/profile`, {
       headers: { "Authorization": `Bearer ${t}` }
     })
       .then(r => r.json())
@@ -31,19 +29,20 @@ export default function Profile() {
         setRole(data.role || "");
         setContext(data.context || "");
         setPreferences(data.preferences || "");
+        setLanguage(data.language || "es");
       });
   }, [router]);
 
   const save = async () => {
     if (!token) return;
     setSaving(true);
-    await fetch(`${API_URL}/api/v1/auth/profile`, {
+    await fetch(`/api/v1/auth/profile`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`
       },
-      body: JSON.stringify({ role, context, preferences })
+      body: JSON.stringify({ role, context, preferences, language })
     });
     setSaving(false);
     setSaved(true);
@@ -56,13 +55,14 @@ export default function Profile() {
     <div className="flex items-center justify-center min-h-screen bg-gray-950 text-gray-100 px-4">
       <div className="w-full max-w-lg">
 
-        {/* Header */}
         <div className="flex items-center gap-3 mb-8">
           <button
             onClick={() => router.push("/")}
-            className="text-gray-500 hover:text-gray-300 transition-colors"
+            className="p-2 rounded-lg hover:bg-gray-800 text-gray-500 hover:text-gray-300 transition-colors"
           >
-            ← Volver
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
           </button>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-400" />
@@ -77,60 +77,87 @@ export default function Profile() {
             MATE usa esta información para personalizar sus respuestas
           </p>
 
-          {/* Info básica */}
-          <div className="bg-gray-800 rounded-xl p-4 mb-6">
-            <p className="text-sm font-medium">{user.name}</p>
-            <p className="text-xs text-gray-500">{user.email}</p>
+          <div className="bg-gray-800 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-emerald-700 flex items-center justify-center text-lg font-bold flex-shrink-0">
+              {user.name[0].toUpperCase()}
+            </div>
+            <div>
+              <p className="text-sm font-medium">{user.name}</p>
+              <p className="text-xs text-gray-500">{user.email}</p>
+            </div>
           </div>
 
-          {/* Campos de perfil */}
           <div className="space-y-4">
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">
-                Rol profesional
-              </label>
+              <label className="text-xs text-gray-400 mb-1 block">Rol profesional</label>
               <input
                 type="text"
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
                 placeholder="Ej: Arquitecto de software, Gerente de IT, DevOps Engineer..."
-                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition-colors placeholder-gray-600"
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition-colors placeholder-gray-600 text-gray-100"
               />
             </div>
 
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">
-                Contexto actual
-              </label>
+              <label className="text-xs text-gray-400 mb-1 block">Contexto actual</label>
               <textarea
                 value={context}
                 onChange={(e) => setContext(e.target.value)}
                 placeholder="Ej: Estoy construyendo un asistente virtual en RHEL 10 con FastAPI y Next.js..."
                 rows={3}
-                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition-colors placeholder-gray-600 resize-none"
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition-colors placeholder-gray-600 resize-none text-gray-100"
               />
             </div>
 
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">
-                Preferencias de respuesta
-              </label>
+              <label className="text-xs text-gray-400 mb-1 block">Preferencias de respuesta</label>
               <textarea
                 value={preferences}
                 onChange={(e) => setPreferences(e.target.value)}
                 placeholder="Ej: Prefiero respuestas técnicas y directas, con ejemplos de código cuando sea relevante..."
                 rows={2}
-                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition-colors placeholder-gray-600 resize-none"
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition-colors placeholder-gray-600 resize-none text-gray-100"
               />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">Idioma de respuesta</label>
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition-colors text-gray-100"
+              >
+                <option value="es">🇦🇷 Español</option>
+                <option value="en">🇺🇸 English</option>
+                <option value="pt">🇧🇷 Português</option>
+                <option value="fr">🇫🇷 Français</option>
+                <option value="de">🇩🇪 Deutsch</option>
+                <option value="it">🇮🇹 Italiano</option>
+              </select>
             </div>
           </div>
 
           <button
             onClick={save}
             disabled={saving}
-            className="w-full mt-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white rounded-xl text-sm font-medium transition-colors"
+            className="w-full mt-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
           >
-            {saving ? "Guardando..." : saved ? "✓ Guardado" : "Guardar perfil"}
+            {saving ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Guardando...
+              </>
+            ) : saved ? (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                Guardado
+              </>
+            ) : (
+              "Guardar perfil"
+            )}
           </button>
         </div>
       </div>
