@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.user import User
@@ -7,8 +9,60 @@ from app.services.conversation.service import (
     get_conversations, get_messages, create_conversation, delete_conversation
 )
 from app.models.conversation import Conversation, Message
+from datetime import datetime
 
 router = APIRouter()
+
+@router.get("/conversations/search")
+async def search_conversations(
+    q: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not q or len(q) < 2:
+        return []
+
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.user_id == current_user.id)
+        .where(Conversation.title.ilike(f"%{q}%"))
+        .order_by(Conversation.updated_at.desc())
+        .limit(10)
+    )
+    convs_by_title = conv_result.scalars().all()
+
+    msg_result = await db.execute(
+        select(Message.conversation_id)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(Conversation.user_id == current_user.id)
+        .where(Message.content.ilike(f"%{q}%"))
+        .distinct()
+        .limit(10)
+    )
+    conv_ids_by_content = [row[0] for row in msg_result.all()]
+
+    found_ids = {c.id for c in convs_by_title}
+    extra_convs = []
+
+    if conv_ids_by_content:
+        extra_result = await db.execute(
+            select(Conversation)
+            .where(Conversation.id.in_(conv_ids_by_content))
+            .where(Conversation.id.notin_(found_ids))
+        )
+        extra_convs = extra_result.scalars().all()
+
+    all_convs = list(convs_by_title) + extra_convs
+
+    return [
+        {
+            "id": c.id,
+            "title": c.title,
+            "updated_at": c.updated_at.isoformat(),
+            "match_type": "title" if c.id in found_ids else "content"
+        }
+        for c in all_convs
+    ]
 
 @router.get("/conversations")
 async def list_conversations(
@@ -60,9 +114,6 @@ async def remove_conversation(
     await delete_conversation(db, conversation_id, current_user.id)
     return {"status": "deleted"}
 
-from fastapi.responses import Response
-from datetime import datetime
-
 @router.get("/conversations/{conversation_id}/export/{format}")
 async def export_conversation(
     conversation_id: str,
@@ -70,7 +121,6 @@ async def export_conversation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Verificar que la conversación pertenece al usuario
     conv_result = await db.execute(
         select(Conversation)
         .where(Conversation.id == conversation_id)
@@ -80,7 +130,6 @@ async def export_conversation(
     if not conv:
         raise HTTPException(404, "Conversación no encontrada")
 
-    # Obtener mensajes
     msgs_result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
@@ -137,57 +186,3 @@ async def export_conversation(
 
     else:
         raise HTTPException(400, "Formato no soportado. Usá: md, txt, json")
-
-        @router.get("/conversations/search")
-async def search_conversations(
-    q: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if not q or len(q) < 2:
-        return []
-
-    # Buscar en títulos de conversaciones
-    conv_result = await db.execute(
-        select(Conversation)
-        .where(Conversation.user_id == current_user.id)
-        .where(Conversation.title.ilike(f"%{q}%"))
-        .order_by(Conversation.updated_at.desc())
-        .limit(10)
-    )
-    convs_by_title = conv_result.scalars().all()
-
-    # Buscar en contenido de mensajes
-    msg_result = await db.execute(
-        select(Message.conversation_id)
-        .join(Conversation, Message.conversation_id == Conversation.id)
-        .where(Conversation.user_id == current_user.id)
-        .where(Message.content.ilike(f"%{q}%"))
-        .distinct()
-        .limit(10)
-    )
-    conv_ids_by_content = [row[0] for row in msg_result.all()]
-
-    # Combinar resultados sin duplicados
-    found_ids = {c.id for c in convs_by_title}
-    extra_convs = []
-
-    if conv_ids_by_content:
-        extra_result = await db.execute(
-            select(Conversation)
-            .where(Conversation.id.in_(conv_ids_by_content))
-            .where(Conversation.id.notin_(found_ids))
-        )
-        extra_convs = extra_result.scalars().all()
-
-    all_convs = list(convs_by_title) + extra_convs
-
-    return [
-        {
-            "id": c.id,
-            "title": c.title,
-            "updated_at": c.updated_at.isoformat(),
-            "match_type": "title" if c.id in found_ids else "content"
-        }
-        for c in all_convs
-    ]
