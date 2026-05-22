@@ -22,7 +22,7 @@ interface Conversation {
 
 export default function Home() {
   const router = useRouter();
-  const [user, setUser] = useState<{name: string; email: string} | null>(null);
+  const [user, setUser] = useState<{name: string; email: string; is_admin?: boolean} | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -37,13 +37,23 @@ export default function Home() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const { notifications, notify, dismiss } = useNotifications();
 
-  useEffect(() => {
-    const t = localStorage.getItem("mate_token");
-    const u = localStorage.getItem("mate_user");
-    if (!t || !u) { router.push("/login"); return; }
-    setToken(t);
-    setUser(JSON.parse(u));
-  }, [router]);
+useEffect(() => {
+  const t = localStorage.getItem("mate_token");
+  const u = localStorage.getItem("mate_user");
+  if (!t || !u) { router.push("/login"); return; }
+  setToken(t);
+  const userData = JSON.parse(u);
+  setUser(userData);
+
+  fetch("/api/v1/auth/profile", {
+    headers: { "Authorization": `Bearer ${t}` }
+  })
+    .then(r => r.json())
+    .then(data => {
+      setUser({ ...userData, is_admin: data.is_admin });
+    })
+    .catch(() => {});
+}, [router]);
 
   const logout = () => {
     localStorage.removeItem("mate_token");
@@ -334,11 +344,13 @@ export default function Home() {
                 <span className="text-xs text-gray-500">Memoria</span>
               </button>
             </div>
-            <button onClick={() => router.push("/admin")}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-emerald-900 transition-colors">
-              <span className="text-sm">⚙️</span>
-              <span className="text-xs text-gray-400">Administración</span>
-            </button>
+           {user?.is_admin && (
+  <button onClick={() => router.push("/admin")}
+    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-emerald-900 transition-colors">
+    <span className="text-sm">⚙️</span>
+    <span className="text-xs text-gray-400">Administración</span>
+  </button>
+)}
             <button onClick={logout}
               className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-red-900/30 transition-colors">
               <span className="text-sm">🚪</span>

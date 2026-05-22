@@ -14,8 +14,8 @@ from datetime import datetime, timedelta
 router = APIRouter()
 
 async def require_admin(current_user: User = Depends(get_current_user)):
-    # Por ahora el primer usuario registrado es admin
-    # En el futuro se puede agregar un campo is_admin
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Acceso denegado — se requiere rol administrador")
     return current_user
 
 @router.get("/admin/stats")

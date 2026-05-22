@@ -52,13 +52,14 @@ class ProfileUpdate(BaseModel):
 @router.get("/auth/profile")
 async def get_profile(current_user: User = Depends(get_current_user)):
     return {
-        "name": current_user.name,
-        "email": current_user.email,
-        "role": current_user.role or "",
-        "context": current_user.context or "",
-        "preferences": current_user.preferences or "",
-        "language": current_user.language or "es"
-    }
+    "name": current_user.name,
+    "email": current_user.email,
+    "role": current_user.role or "",
+    "context": current_user.context or "",
+    "preferences": current_user.preferences or "",
+    "language": current_user.language or "es",
+    "is_admin": current_user.is_admin or False
+}
 
 @router.put("/auth/profile")
 async def update_profile(
