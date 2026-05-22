@@ -58,7 +58,7 @@ export default function Admin() {
         </div>
 
         <div className="flex gap-2 mb-6">
-          {(["stats", "users", "conversations"] as const).map((t) => (
+          {(["stats", "users", "conversations", "backups"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 tab === t ? "bg-emerald-600 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200"

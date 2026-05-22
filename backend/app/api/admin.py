@@ -154,3 +154,40 @@ async def get_search_usage(
         "free_tier_percentage": free_pct,
         "free_tier_limit": 1000
     }
+
+import subprocess
+
+@router.post("/admin/backup")
+async def trigger_backup(
+    current_user: User = Depends(require_admin)
+):
+    try:
+        result = subprocess.run(
+            ["/home/jmontero/aiden/scripts/backup.sh"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if result.returncode == 0:
+            return {"status": "success", "output": result.stdout}
+        else:
+            return {"status": "error", "output": result.stderr}
+    except Exception as e:
+        raise HTTPException(500, f"Error ejecutando backup: {str(e)}")
+
+@router.get("/admin/backups")
+async def list_backups(
+    current_user: User = Depends(require_admin)
+):
+    import glob
+    backup_dir = "/home/jmontero/mate_backups"
+    files = sorted(glob.glob(f"{backup_dir}/mate_backup_*.tar.gz"), reverse=True)
+    backups = []
+    for f in files[:10]:
+        stat = os.stat(f)
+        backups.append({
+            "filename": os.path.basename(f),
+            "size_mb": round(stat.st_size / (1024 * 1024), 2),
+            "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
+        })
+    return backups
