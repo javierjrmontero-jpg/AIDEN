@@ -4,6 +4,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import MessageActions from "@/components/MessageActions";
+import Notification from "@/components/Notification";
+import { useNotifications } from "@/components/useNotifications";
 
 const API_URL = "";
 
@@ -30,6 +32,7 @@ export default function Home() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const { notifications, notify, dismiss } = useNotifications();
 
   useEffect(() => {
     const t = localStorage.getItem("mate_token");
@@ -38,6 +41,23 @@ export default function Home() {
     setToken(t);
     setUser(JSON.parse(u));
   }, [router]);
+
+  useEffect(() => {
+  if (!token) return;
+  fetch("/api/v1/admin/search-usage", {
+    headers: { "Authorization": `Bearer ${token}` }
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.free_tier_percentage <= 20) {
+        notify(
+          `⚠️ Crédito Brave Search bajo: ${data.free_tier_remaining} búsquedas restantes (${data.free_tier_percentage}%)`,
+          "warning"
+        );
+      }
+    })
+    .catch(() => {});
+  }, [token]);
 
   const logout = () => {
     localStorage.removeItem("mate_token");
