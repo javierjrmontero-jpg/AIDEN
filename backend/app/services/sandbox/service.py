@@ -6,11 +6,31 @@ logger = logging.getLogger(__name__)
 TIMEOUT_SECONDS = 15
 MAX_OUTPUT_LENGTH = 5000
 
-async def execute_python(code: str) -> dict:
-    """
-    Ejecuta código Python en un contenedor Docker aislado.
-    Pasa el código por stdin para evitar problemas de montaje de volúmenes.
-    """
+LANGUAGE_CONFIG = {
+    "python": {
+        "image": "python:3.12-slim",
+        "cmd": ["python", "-c"],
+    },
+    "javascript": {
+        "image": "node:22-slim",
+        "cmd": ["node", "-e"],
+    },
+    "bash": {
+        "image": "alpine:latest",
+        "cmd": ["sh", "-c"],
+    }
+}
+
+async def execute_code(code: str, language: str = "python") -> dict:
+    config = LANGUAGE_CONFIG.get(language)
+    if not config:
+        return {
+            "success": False,
+            "output": "",
+            "error": f"Lenguaje no soportado: {language}. Soportados: {list(LANGUAGE_CONFIG.keys())}",
+            "exit_code": -1
+        }
+
     try:
         cmd = [
             "docker", "run",
@@ -19,11 +39,11 @@ async def execute_python(code: str) -> dict:
             "--network", "none",
             "--memory", "128m",
             "--cpus", "0.5",
-            "python:3.12-slim",
-            "python", "-c", code
+            config["image"],
+            *config["cmd"], code
         ]
 
-        logger.info("Ejecutando código en sandbox...")
+        logger.info(f"Ejecutando {language} en sandbox...")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -66,3 +86,7 @@ async def execute_python(code: str) -> dict:
             "error": str(e),
             "exit_code": -1
         }
+
+# Mantener compatibilidad con el código existente
+async def execute_python(code: str) -> dict:
+    return await execute_code(code, "python")

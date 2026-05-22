@@ -8,6 +8,20 @@ interface Props {
   token: string;
 }
 
+const SUPPORTED_LANGUAGES = ["python", "javascript", "bash"];
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  python: "▶ Ejecutar Python",
+  javascript: "▶ Ejecutar JavaScript",
+  bash: "▶ Ejecutar Bash",
+};
+
+const LANGUAGE_COLORS: Record<string, string> = {
+  python: "bg-blue-700 hover:bg-blue-600",
+  javascript: "bg-yellow-700 hover:bg-yellow-600",
+  bash: "bg-gray-700 hover:bg-gray-600",
+};
+
 export default function CodeExecutor({ code, language, token }: Props) {
   const [result, setResult] = useState<{
     success: boolean;
@@ -16,7 +30,8 @@ export default function CodeExecutor({ code, language, token }: Props) {
   } | null>(null);
   const [running, setRunning] = useState(false);
 
-  if (language !== "python") return null;
+  const lang = language.toLowerCase();
+  if (!SUPPORTED_LANGUAGES.includes(lang)) return null;
 
   const execute = async () => {
     setRunning(true);
@@ -28,7 +43,7 @@ export default function CodeExecutor({ code, language, token }: Props) {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ code })
+        body: JSON.stringify({ code, language: lang })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -48,7 +63,7 @@ export default function CodeExecutor({ code, language, token }: Props) {
       <button
         onClick={execute}
         disabled={running}
-        className="flex items-center gap-2 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 text-white rounded-lg text-xs font-medium transition-colors"
+        className={`flex items-center gap-2 px-3 py-1.5 ${LANGUAGE_COLORS[lang]} disabled:bg-gray-700 text-white rounded-lg text-xs font-medium transition-colors`}
       >
         {running ? (
           <>
@@ -56,7 +71,7 @@ export default function CodeExecutor({ code, language, token }: Props) {
             Ejecutando...
           </>
         ) : (
-          <>▶ Ejecutar Python</>
+          LANGUAGE_LABELS[lang]
         )}
       </button>
 
