@@ -137,3 +137,57 @@ async def export_conversation(
 
     else:
         raise HTTPException(400, "Formato no soportado. Usá: md, txt, json")
+
+        @router.get("/conversations/search")
+async def search_conversations(
+    q: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not q or len(q) < 2:
+        return []
+
+    # Buscar en títulos de conversaciones
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.user_id == current_user.id)
+        .where(Conversation.title.ilike(f"%{q}%"))
+        .order_by(Conversation.updated_at.desc())
+        .limit(10)
+    )
+    convs_by_title = conv_result.scalars().all()
+
+    # Buscar en contenido de mensajes
+    msg_result = await db.execute(
+        select(Message.conversation_id)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(Conversation.user_id == current_user.id)
+        .where(Message.content.ilike(f"%{q}%"))
+        .distinct()
+        .limit(10)
+    )
+    conv_ids_by_content = [row[0] for row in msg_result.all()]
+
+    # Combinar resultados sin duplicados
+    found_ids = {c.id for c in convs_by_title}
+    extra_convs = []
+
+    if conv_ids_by_content:
+        extra_result = await db.execute(
+            select(Conversation)
+            .where(Conversation.id.in_(conv_ids_by_content))
+            .where(Conversation.id.notin_(found_ids))
+        )
+        extra_convs = extra_result.scalars().all()
+
+    all_convs = list(convs_by_title) + extra_convs
+
+    return [
+        {
+            "id": c.id,
+            "title": c.title,
+            "updated_at": c.updated_at.isoformat(),
+            "match_type": "title" if c.id in found_ids else "content"
+        }
+        for c in all_convs
+    ]

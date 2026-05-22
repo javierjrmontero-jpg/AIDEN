@@ -12,6 +12,8 @@ export default function Admin() {
   const [conversations, setConversations] = useState<any[]>([]);
   const [tab, setTab] = useState<"stats" | "users" | "conversations">("stats");
   const [loading, setLoading] = useState(true);
+  const [backups, setBackups] = useState<any[]>([]);
+  const [backingUp, setBackingUp] = useState(false);
 
   useEffect(() => {
     const t = localStorage.getItem("mate_token");
@@ -23,6 +25,8 @@ export default function Admin() {
   const loadData = async (t: string) => {
     setLoading(true);
     try {
+      const b = await fetch("/api/v1/admin/backups", { headers: { "Authorization": `Bearer ${t}` } });
+setBackups(await b.json());
       const [s, u, c, su] = await Promise.all([
         fetch("/api/v1/admin/stats", { headers: { "Authorization": `Bearer ${t}` } }),
         fetch("/api/v1/admin/users", { headers: { "Authorization": `Bearer ${t}` } }),
@@ -63,7 +67,7 @@ export default function Admin() {
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 tab === t ? "bg-emerald-600 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200"
               }`}>
-              {t === "stats" ? "📊 Estadísticas" : t === "users" ? "👤 Usuarios" : "💬 Conversaciones"}
+              {t === "stats" ? "📊 Estadísticas" : t === "users" ? "👤 Usuarios" : t === "conversations" ? "💬 Conversaciones" : "💾 Backups"}
             </button>
           ))}
           <button onClick={() => token && loadData(token)}
@@ -201,6 +205,71 @@ export default function Admin() {
                 </div>
               </div>
             )}
+            {tab === "backups" && (
+  <div className="space-y-4">
+    <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
+      <h3 className="text-sm font-semibold mb-2">Backup manual</h3>
+      <p className="text-xs text-gray-500 mb-4">
+        Los backups automáticos se ejecutan todos los días a las 2 AM.
+        Se mantienen los últimos 7 backups.
+      </p>
+      <button
+        onClick={async () => {
+          setBackingUp(true);
+          await fetch("/api/v1/admin/backup", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          setBackingUp(false);
+          if (token) loadData(token);
+        }}
+        disabled={backingUp}
+        className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 text-white rounded-lg text-sm transition-colors"
+      >
+        {backingUp ? (
+          <>
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            Creando backup...
+          </>
+        ) : (
+          <>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Crear backup ahora
+          </>
+        )}
+      </button>
+    </div>
+
+    <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-800">
+        <h3 className="text-sm font-semibold">Backups disponibles ({backups.length})</h3>
+      </div>
+      {backups.length === 0 ? (
+        <p className="text-xs text-gray-600 text-center py-8">No hay backups aún</p>
+      ) : (
+        <div className="divide-y divide-gray-800">
+          {backups.map((b) => (
+            <div key={b.filename} className="flex items-center gap-4 px-4 py-3">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500 flex-shrink-0">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-mono text-gray-300 truncate">{b.filename}</p>
+                <p className="text-xs text-gray-600">{b.size_mb} MB · {fmt(b.created_at)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  </div>
+)}
           </>
         )}
       </div>

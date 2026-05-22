@@ -8,6 +8,8 @@ services:
       - ./backend:/app
       - ./data:/data
       - ./data/models:/root/.cache/huggingface
+      - ./scripts:/scripts
+      - /home/jmontero/mate_backups:/backups
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env

@@ -162,14 +162,31 @@ async def trigger_backup(
     current_user: User = Depends(require_admin)
 ):
     try:
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = f"/backups/mate_backup_{timestamp}.tar.gz"
+
         result = subprocess.run(
-            ["/home/jmontero/aiden/scripts/backup.sh"],
+            ["tar", "-czf", backup_file, "-C", "/", "data/db", "data/vectordb"],
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
+            cwd="/app"
         )
+
+        # Limpiar backups viejos manteniendo solo 7
+        import glob
+        files = sorted(glob.glob("/backups/mate_backup_*.tar.gz"), reverse=True)
+        for old_file in files[7:]:
+            os.remove(old_file)
+
         if result.returncode == 0:
-            return {"status": "success", "output": result.stdout}
+            size = os.path.getsize(backup_file)
+            return {
+                "status": "success",
+                "file": os.path.basename(backup_file),
+                "size_mb": round(size / (1024 * 1024), 2)
+            }
         else:
             return {"status": "error", "output": result.stderr}
     except Exception as e:
@@ -180,8 +197,7 @@ async def list_backups(
     current_user: User = Depends(require_admin)
 ):
     import glob
-    backup_dir = "/home/jmontero/mate_backups"
-    files = sorted(glob.glob(f"{backup_dir}/mate_backup_*.tar.gz"), reverse=True)
+    files = sorted(glob.glob("/backups/mate_backup_*.tar.gz"), reverse=True)
     backups = []
     for f in files[:10]:
         stat = os.stat(f)
@@ -191,3 +207,4 @@ async def list_backups(
             "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
         })
     return backups
+

@@ -31,6 +31,9 @@ export default function Home() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Conversation[]>([]);
+  const [searchingConv, setSearchingConv] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const { notifications, notify, dismiss } = useNotifications();
 
@@ -41,23 +44,6 @@ export default function Home() {
     setToken(t);
     setUser(JSON.parse(u));
   }, [router]);
-
-  useEffect(() => {
-  if (!token) return;
-  fetch("/api/v1/admin/search-usage", {
-    headers: { "Authorization": `Bearer ${token}` }
-  })
-    .then(r => r.json())
-    .then(data => {
-      if (data.free_tier_percentage <= 20 && data.searches_this_month > 0) {
-        notify(
-          `Crédito Brave Search bajo: ${data.free_tier_remaining} búsquedas restantes (${data.free_tier_percentage}%)`,
-          "warning"
-        );
-      }
-    })
-    .catch(() => {});
-  }, [token]);
 
   const logout = () => {
     localStorage.removeItem("mate_token");
@@ -86,6 +72,42 @@ export default function Home() {
   useEffect(() => {
     if (token) loadConversations();
   }, [token, loadConversations]);
+
+  // Verificar crédito Brave
+  useEffect(() => {
+    if (!token) return;
+    fetch("/api/v1/admin/search-usage", {
+      headers: { "Authorization": `Bearer ${token}` }
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.free_tier_percentage <= 20 && data.searches_this_month > 0) {
+          notify(
+            `Crédito Brave Search bajo: ${data.free_tier_remaining} búsquedas restantes (${data.free_tier_percentage}%)`,
+            "warning"
+          );
+        }
+      })
+      .catch(() => {});
+  }, [token]);
+
+  const searchConversations = useCallback(async (query: string) => {
+    if (!token || query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    setSearchingConv(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/conversations/search?q=${encodeURIComponent(query)}`, {
+        headers: authHeaders()
+      });
+      setSearchResults(await res.json());
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSearchingConv(false);
+    }
+  }, [token, authHeaders]);
 
   const loadConversation = async (id: string) => {
     if (!token) return;
@@ -122,9 +144,7 @@ export default function Home() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error("Error exportando:", e);
-    }
+    } catch (e) { console.error(e); }
   };
 
   const sendMessage = async () => {
@@ -203,6 +223,8 @@ export default function Home() {
 
   if (!user) return null;
 
+  const displayedConversations = searchQuery.length >= 2 ? searchResults : conversations;
+
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100">
       {sidebarOpen && (
@@ -214,55 +236,73 @@ export default function Home() {
               <span className="font-semibold text-sm">MATE</span>
             </div>
             <button onClick={newConversation}
-              className="w-full px-3 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium transition-colors">
+              className="w-full px-3 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium transition-colors mb-2">
               + Nueva conversación
             </button>
+            {/* Buscador */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Buscar conversaciones..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  searchConversations(e.target.value);
+                }}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs outline-none focus:border-emerald-500 transition-colors placeholder-gray-600 text-gray-300"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => { setSearchQuery(""); setSearchResults([]); }}
+                  className="absolute right-2 top-2 text-gray-500 hover:text-gray-300"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Lista de conversaciones */}
           <div className="flex-1 overflow-y-auto py-2">
-            {conversations.length === 0 && (
+            {searchQuery.length >= 2 && searchResults.length === 0 && !searchingConv && (
+              <p className="text-xs text-gray-600 text-center mt-4 px-4">Sin resultados</p>
+            )}
+            {searchQuery.length < 2 && conversations.length === 0 && (
               <p className="text-xs text-gray-600 text-center mt-4 px-4">No hay conversaciones aún</p>
             )}
-           {conversations.map((conv) => (
-  <div
-    key={conv.id}
-    onClick={() => loadConversation(conv.id)}
-    className={`group flex items-center gap-2 px-3 py-2 mx-2 rounded-lg cursor-pointer transition-colors ${
-      conversationId === conv.id ? "bg-gray-700" : "hover:bg-gray-800"
-    }`}
-  >
-    <div className="flex-1 min-w-0">
-      <p className="text-xs text-gray-300 truncate">{conv.title}</p>
-      <p className="text-xs text-gray-600">{formatDate(conv.updated_at)}</p>
-    </div>
-   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-all">
-  <button
-    onClick={(e) => exportConversation(conv.id, "md", e)}
-    title="Exportar"
-    className="p-1 rounded hover:bg-emerald-800 text-gray-500 hover:text-emerald-300 transition-colors"
-  >
-    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="7 10 12 15 17 10"/>
-      <line x1="12" y1="15" x2="12" y2="3"/>
-    </svg>
-  </button>
-  <button
-    onClick={(e) => deleteConversation(conv.id, e)}
-    title="Eliminar"
-    className="p-1 rounded hover:bg-red-900 text-gray-500 hover:text-red-400 transition-colors"
-  >
-    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="3 6 5 6 21 6"/>
-      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-      <path d="M10 11v6M14 11v6"/>
-      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-    </svg>
-  </button>
-</div>
-  </div>
-))}
+            {displayedConversations.map((conv) => (
+              <div key={conv.id} onClick={() => loadConversation(conv.id)}
+                className={`group flex items-center gap-2 px-3 py-2 mx-2 rounded-lg cursor-pointer transition-colors ${
+                  conversationId === conv.id ? "bg-gray-700" : "hover:bg-gray-800"
+                }`}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-300 truncate">{conv.title}</p>
+                  <p className="text-xs text-gray-600">{formatDate(conv.updated_at)}</p>
+                </div>
+                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-all">
+                  <button onClick={(e) => exportConversation(conv.id, "md", e)} title="Exportar"
+                    className="p-1 rounded hover:bg-emerald-800 text-gray-500 hover:text-emerald-300 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                  </button>
+                  <button onClick={(e) => deleteConversation(conv.id, e)} title="Eliminar"
+                    className="p-1 rounded hover:bg-red-900 text-gray-500 hover:text-red-400 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                      <path d="M10 11v6M14 11v6"/>
+                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Footer sidebar */}
@@ -412,14 +452,16 @@ export default function Home() {
           </p>
         </div>
       </div>
+
+      {/* Notificaciones */}
       {notifications.map(n => (
-  <Notification
-    key={n.id}
-    message={n.message}
-    type={n.type}
-    onClose={() => dismiss(n.id)}
-  />
-))}
+        <Notification
+          key={n.id}
+          message={n.message}
+          type={n.type}
+          onClose={() => dismiss(n.id)}
+        />
+      ))}
     </div>
   );
 }
