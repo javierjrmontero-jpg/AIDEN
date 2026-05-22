@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.auth import get_current_user
@@ -6,6 +6,7 @@ from app.models.user import User
 from app.services.conversation.service import (
     get_conversations, get_messages, create_conversation, delete_conversation
 )
+from app.models.conversation import Conversation, Message
 
 router = APIRouter()
 
@@ -58,3 +59,81 @@ async def remove_conversation(
 ):
     await delete_conversation(db, conversation_id, current_user.id)
     return {"status": "deleted"}
+
+from fastapi.responses import Response
+from datetime import datetime
+
+@router.get("/conversations/{conversation_id}/export/{format}")
+async def export_conversation(
+    conversation_id: str,
+    format: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Verificar que la conversación pertenece al usuario
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conversation_id)
+        .where(Conversation.user_id == current_user.id)
+    )
+    conv = conv_result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(404, "Conversación no encontrada")
+
+    # Obtener mensajes
+    msgs_result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.order_index)
+    )
+    messages = msgs_result.scalars().all()
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"mate_{conv.title[:30].replace(' ', '_')}_{timestamp}"
+
+    if format == "md":
+        content = f"# {conv.title}\n\n"
+        content += f"*Exportado el {datetime.now().strftime('%d/%m/%Y %H:%M')} — MATE by JJRM*\n\n---\n\n"
+        for msg in messages:
+            prefix = "**Vos:**" if msg.role == "user" else "**MATE:**"
+            content += f"{prefix}\n\n{msg.content}\n\n---\n\n"
+        return Response(
+            content=content.encode("utf-8"),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f"attachment; filename={filename}.md"}
+        )
+
+    elif format == "txt":
+        content = f"{conv.title}\n{'='*50}\n\n"
+        for msg in messages:
+            prefix = "VOS:" if msg.role == "user" else "MATE:"
+            content += f"{prefix}\n{msg.content}\n\n{'-'*30}\n\n"
+        return Response(
+            content=content.encode("utf-8"),
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename={filename}.txt"}
+        )
+
+    elif format == "json":
+        import json
+        data = {
+            "title": conv.title,
+            "exported_at": datetime.now().isoformat(),
+            "assistant": "MATE by JJRM",
+            "messages": [
+                {
+                    "role": m.role,
+                    "content": m.content,
+                    "order": m.order_index
+                }
+                for m in messages
+            ]
+        }
+        return Response(
+            content=json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"),
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename={filename}.json"}
+        )
+
+    else:
+        raise HTTPException(400, "Formato no soportado. Usá: md, txt, json")

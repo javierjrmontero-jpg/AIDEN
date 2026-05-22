@@ -86,6 +86,27 @@ export default function Home() {
     loadConversations();
   };
 
+  const exportConversation = async (id: string, format: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/v1/conversations/${id}/export/${format}`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `mate_conversacion.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Error exportando:", e);
+    }
+  };
+
   const sendMessage = async () => {
     if (!input.trim() || loading || !token) return;
     const userMessage: Message = { role: "user", content: input };
@@ -183,21 +204,45 @@ export default function Home() {
             {conversations.length === 0 && (
               <p className="text-xs text-gray-600 text-center mt-4 px-4">No hay conversaciones aún</p>
             )}
-            {conversations.map((conv) => (
-              <div key={conv.id} onClick={() => loadConversation(conv.id)}
-                className={`group flex items-center gap-2 px-3 py-2 mx-2 rounded-lg cursor-pointer transition-colors ${
-                  conversationId === conv.id ? "bg-gray-700" : "hover:bg-gray-800"
-                }`}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-300 truncate">{conv.title}</p>
-                  <p className="text-xs text-gray-600">{formatDate(conv.updated_at)}</p>
-                </div>
-                <button onClick={(e) => deleteConversation(conv.id, e)}
-                  className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition-all text-xs">
-                  ✕
-                </button>
-              </div>
-            ))}
+           {conversations.map((conv) => (
+  <div
+    key={conv.id}
+    onClick={() => loadConversation(conv.id)}
+    className={`group flex items-center gap-2 px-3 py-2 mx-2 rounded-lg cursor-pointer transition-colors ${
+      conversationId === conv.id ? "bg-gray-700" : "hover:bg-gray-800"
+    }`}
+  >
+    <div className="flex-1 min-w-0">
+      <p className="text-xs text-gray-300 truncate">{conv.title}</p>
+      <p className="text-xs text-gray-600">{formatDate(conv.updated_at)}</p>
+    </div>
+   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-all">
+  <button
+    onClick={(e) => exportConversation(conv.id, "md", e)}
+    title="Exportar"
+    className="p-1 rounded hover:bg-emerald-800 text-gray-500 hover:text-emerald-300 transition-colors"
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="7 10 12 15 17 10"/>
+      <line x1="12" y1="15" x2="12" y2="3"/>
+    </svg>
+  </button>
+  <button
+    onClick={(e) => deleteConversation(conv.id, e)}
+    title="Eliminar"
+    className="p-1 rounded hover:bg-red-900 text-gray-500 hover:text-red-400 transition-colors"
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+      <path d="M10 11v6M14 11v6"/>
+      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+    </svg>
+  </button>
+</div>
+  </div>
+))}
           </div>
 
           {/* Footer sidebar */}
