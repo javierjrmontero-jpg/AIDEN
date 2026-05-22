@@ -412,6 +412,14 @@ export default function Home() {
           </p>
         </div>
       </div>
+      {notifications.map(n => (
+  <Notification
+    key={n.id}
+    message={n.message}
+    type={n.type}
+    onClose={() => dismiss(n.id)}
+  />
+))}
     </div>
   );
 }
