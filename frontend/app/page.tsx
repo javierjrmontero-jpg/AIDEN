@@ -49,9 +49,9 @@ export default function Home() {
   })
     .then(r => r.json())
     .then(data => {
-      if (data.free_tier_percentage <= 20) {
+      if (data.free_tier_percentage <= 20 && data.searches_this_month > 0) {
         notify(
-          `⚠️ Crédito Brave Search bajo: ${data.free_tier_remaining} búsquedas restantes (${data.free_tier_percentage}%)`,
+          `Crédito Brave Search bajo: ${data.free_tier_remaining} búsquedas restantes (${data.free_tier_percentage}%)`,
           "warning"
         );
       }
