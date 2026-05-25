@@ -6,6 +6,8 @@ import MarkdownRenderer from "@/components/MarkdownRenderer";
 import MessageActions from "@/components/MessageActions";
 import Notification from "@/components/Notification";
 import { useNotifications } from "@/components/useNotifications";
+import VoiceInput from "@/components/VoiceInput";
+import { useTTS } from "@/components/useTTS";
 
 const API_URL = "";
 
@@ -36,6 +38,9 @@ export default function Home() {
   const [searchingConv, setSearchingConv] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const { notifications, notify, dismiss } = useNotifications();
+  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [voiceLang, setVoiceLang] = useState("es-AR");
+  const { speak, stop } = useTTS(voiceLang);
 
 useEffect(() => {
   const t = localStorage.getItem("mate_token");
@@ -46,13 +51,18 @@ useEffect(() => {
   setUser(userData);
 
   fetch("/api/v1/auth/profile", {
-    headers: { "Authorization": `Bearer ${t}` }
+  headers: { "Authorization": `Bearer ${t}` }
+})
+  .then(r => r.json())
+  .then(data => {
+    setUser({ ...userData, is_admin: data.is_admin });
+    const langMap: Record<string, string> = {
+      es: "es-AR", en: "en-US", pt: "pt-BR",
+      fr: "fr-FR", de: "de-DE", it: "it-IT"
+    };
+    setVoiceLang(langMap[data.language || "es"] || "es-AR");
   })
-    .then(r => r.json())
-    .then(data => {
-      setUser({ ...userData, is_admin: data.is_admin });
-    })
-    .catch(() => {});
+  .catch(() => {});
 }, [router]);
 
   const logout = () => {
@@ -255,6 +265,16 @@ useEffect(() => {
         updated[updated.length - 1] = { role: "assistant", content: "Error al conectar con MATE." };
         return updated;
       });
+      // Leer respuesta en voz alta si TTS está activado
+if (ttsEnabled) {
+  setMessages(prev => {
+    const last = prev[prev.length - 1];
+    if (last?.role === "assistant" && last.content) {
+      speak(last.content);
+    }
+    return prev;
+  });
+}
     } finally {
       setLoading(false);
       setSearching(false);
@@ -490,26 +510,49 @@ useEffect(() => {
           <div ref={bottomRef} />
         </div>
 
-        <div className="px-4 py-4 border-t border-gray-800 bg-gray-900">
-          <div className="flex gap-3 max-w-4xl mx-auto">
-            <textarea
-              className="flex-1 bg-gray-800 text-gray-100 rounded-xl px-4 py-3 text-sm resize-none outline-none border border-gray-700 focus:border-emerald-500 transition-colors placeholder-gray-500"
-              placeholder="Escribí tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)"
-              rows={1}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={loading}
-            />
-            <button onClick={sendMessage} disabled={loading || !input.trim()}
-              className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-xl text-sm font-medium transition-colors">
-              {loading ? "..." : "Enviar"}
-            </button>
-          </div>
-          <p className="text-center text-xs text-gray-600 mt-2">
-            MATE · Motor de Asistencia Técnica e Inteligencia by JJRM
-          </p>
-        </div>
+        <div className="flex gap-3 max-w-4xl mx-auto">
+  <textarea
+    className="flex-1 bg-gray-800 text-gray-100 rounded-xl px-4 py-3 text-sm resize-none outline-none border border-gray-700 focus:border-emerald-500 transition-colors placeholder-gray-500"
+    placeholder="Escribí tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)"
+    rows={1}
+    value={input}
+    onChange={(e) => setInput(e.target.value)}
+    onKeyDown={handleKeyDown}
+    disabled={loading}
+  />
+  <VoiceInput
+    onTranscript={(text) => setInput(prev => prev + text)}
+    disabled={loading}
+    language={voiceLang}
+  />
+  <button
+    onClick={() => { setTtsEnabled(!ttsEnabled); if (ttsEnabled) stop(); }}
+    title={ttsEnabled ? "Desactivar voz de MATE" : "Activar voz de MATE"}
+    className={`p-3 rounded-xl transition-colors ${
+      ttsEnabled ? "bg-emerald-700 hover:bg-emerald-600" : "bg-gray-700 hover:bg-gray-600"
+    }`}
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {ttsEnabled ? (
+        <>
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+        </>
+      ) : (
+        <>
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <line x1="23" y1="9" x2="17" y2="15"/>
+          <line x1="17" y1="9" x2="23" y2="15"/>
+        </>
+      )}
+    </svg>
+  </button>
+  <button onClick={sendMessage} disabled={loading || !input.trim()}
+    className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-xl text-sm font-medium transition-colors">
+    {loading ? "..." : "Enviar"}
+  </button>
+</div>
       </div>
 
       {/* Notificaciones */}
