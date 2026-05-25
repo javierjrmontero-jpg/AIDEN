@@ -36,6 +36,9 @@ SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un a
 ## Tareas pendientes del usuario
 {tasks_context}
 
+## Emails no leídos
+{emails_context}
+
 ## Documentos del usuario (RAG)
 {rag_context}
 
@@ -105,6 +108,29 @@ async def stream_chat(messages: list, user=None, db=None):
         except Exception as e:
             logger.error(f"Error cargando tareas: {e}")
 
+    # Emails no leídos
+    emails_text = "No hay emails no leídos o email no configurado."
+    if user and db:
+        try:
+            from sqlalchemy import select
+            from app.models.email_config import EmailConfig
+            from app.services.email.service import fetch_unread
+            result = await db.execute(
+                select(EmailConfig)
+                .where(EmailConfig.user_id == user.id)
+                .where(EmailConfig.enabled == True)
+            )
+            email_config = result.scalar_one_or_none()
+            if email_config:
+                unread = await fetch_unread(email_config, limit=5)
+                if unread:
+                    lines = [f"Tenés {len(unread)} email(s) no leído(s):"]
+                    for e in unread:
+                        lines.append(f"- De: {e['from'].split('<')[0].strip()} | Asunto: {e['subject']}")
+                    emails_text = "\n".join(lines)
+        except Exception as e:
+            logger.error(f"Error cargando emails: {e}")
+
     # RAG sobre documentos
     rag_context = "No hay documentos cargados."
     try:
@@ -142,6 +168,7 @@ async def stream_chat(messages: list, user=None, db=None):
         user_language=user_language,
         memories=memories_text,
         tasks_context=tasks_text,
+        emails_context=emails_text,
         rag_context=rag_context,
         web_context=web_context,
         fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
