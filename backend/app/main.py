@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import chat, conversations, auth, documents, generate, memories, sandbox, admin
+from app.api import chat, conversations, auth, documents, generate, memories, sandbox, admin, tasks
 from app.core.config import settings
 from app.core.database import init_db
 
@@ -35,6 +35,7 @@ app.include_router(generate.router, prefix="/api/v1")
 app.include_router(memories.router, prefix="/api/v1")
 app.include_router(sandbox.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(tasks.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

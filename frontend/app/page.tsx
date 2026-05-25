@@ -327,23 +327,28 @@ useEffect(() => {
                 <p className="text-xs text-gray-600 truncate">{user.email}</p>
               </div>
             </button>
-            <div className="grid grid-cols-3 gap-1">
-              <button onClick={() => router.push("/profile")}
-                className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
-                <span className="text-sm">👤</span>
-                <span className="text-xs text-gray-500">Perfil</span>
-              </button>
-              <button onClick={() => router.push("/documents")}
-                className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
-                <span className="text-sm">📄</span>
-                <span className="text-xs text-gray-500">Docs</span>
-              </button>
-              <button onClick={() => router.push("/memories")}
-                className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
-                <span className="text-sm">🧠</span>
-                <span className="text-xs text-gray-500">Memoria</span>
-              </button>
-            </div>
+           <div className="grid grid-cols-4 gap-1">
+  <button onClick={() => router.push("/profile")}
+    className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+    <span className="text-sm">👤</span>
+    <span className="text-xs text-gray-500">Perfil</span>
+  </button>
+  <button onClick={() => router.push("/documents")}
+    className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+    <span className="text-sm">📄</span>
+    <span className="text-xs text-gray-500">Docs</span>
+  </button>
+  <button onClick={() => router.push("/memories")}
+    className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+    <span className="text-sm">🧠</span>
+    <span className="text-xs text-gray-500">Memoria</span>
+  </button>
+  <button onClick={() => router.push("/tasks")}
+    className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+    <span className="text-sm">✅</span>
+    <span className="text-xs text-gray-500">Tareas</span>
+  </button>
+</div>
            {user?.is_admin && (
   <button onClick={() => router.push("/admin")}
     className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-emerald-900 transition-colors">

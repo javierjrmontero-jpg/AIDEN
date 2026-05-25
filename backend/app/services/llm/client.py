@@ -33,6 +33,9 @@ SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un a
 ## Lo que recordás del usuario (memorias previas)
 {memories}
 
+## Tareas pendientes del usuario
+{tasks_context}
+
 ## Documentos del usuario (RAG)
 {rag_context}
 
@@ -91,6 +94,31 @@ async def stream_chat(messages: list, user=None, db=None):
     except Exception as e:
         logger.error(f"Error en RAG: {e}")
 
+# Tareas pendientes
+tasks_text = "No hay tareas pendientes."
+if user and db:
+    try:
+        from sqlalchemy import select
+        from app.models.task import Task
+        from datetime import datetime
+        result = await db.execute(
+            select(Task)
+            .where(Task.user_id == user.id)
+            .where(Task.completed == False)
+            .order_by(Task.due_date.asc())
+            .limit(5)
+        )
+        pending_tasks = result.scalars().all()
+        if pending_tasks:
+            lines = []
+            for t in pending_tasks:
+                due = f" (vence: {t.due_date.strftime('%d/%m/%Y')})" if t.due_date else ""
+                priority_icon = "🔴" if t.priority == "high" else "🟡" if t.priority == "medium" else "🟢"
+                lines.append(f"{priority_icon} {t.title}{due}")
+            tasks_text = "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error cargando tareas: {e}")
+
     # Búsqueda web
     web_context = "No se realizó búsqueda web."
     if should_search_web(query):
@@ -104,6 +132,7 @@ async def stream_chat(messages: list, user=None, db=None):
             logger.error(f"Error en búsqueda web: {e}")
             yield f"data: {json.dumps('[STATUS:done]')}\n\n"
 
+    
     lang_code = user.language if user and user.language else "es"
     user_language = LANGUAGE_MAP.get(lang_code, "español")
 
@@ -117,7 +146,8 @@ async def stream_chat(messages: list, user=None, db=None):
     rag_context=rag_context,
     web_context=web_context,
     fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
-)
+    tasks_context=tasks_text,
+    )
 
     with client.messages.stream(
         model="claude-sonnet-4-5",
