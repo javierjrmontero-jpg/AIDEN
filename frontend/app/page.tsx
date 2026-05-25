@@ -101,6 +101,43 @@ useEffect(() => {
       .catch(() => {});
   }, [token]);
 
+// Verificar tareas vencidas o por vencer
+useEffect(() => {
+  if (!token) return;
+
+  const checkTasks = async () => {
+    try {
+      const res = await fetch("/api/v1/tasks?completed=false", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const tasks = await res.json();
+      const now = new Date();
+
+      tasks.forEach((task: any) => {
+        if (!task.due_date) return;
+        const due = new Date(task.due_date);
+        const diffMs = due.getTime() - now.getTime();
+        const diffMins = diffMs / (1000 * 60);
+
+        if (diffMs < 0) {
+          // Vencida
+          notify(`⏰ Tarea vencida: "${task.title}"`, "error");
+        } else if (diffMins <= 30) {
+          // Por vencer en 30 minutos
+          notify(`⚠️ Tarea por vencer: "${task.title}" (${Math.round(diffMins)} min)`, "warning");
+        }
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Verificar al cargar y cada 5 minutos
+  checkTasks();
+  const interval = setInterval(checkTasks, 5 * 60 * 1000);
+  return () => clearInterval(interval);
+}, [token]);
+
   const searchConversations = useCallback(async (query: string) => {
     if (!token || query.length < 2) {
       setSearchResults([]);

@@ -81,6 +81,30 @@ async def stream_chat(messages: list, user=None, db=None):
         except Exception as e:
             logger.error(f"Error cargando memorias: {e}")
 
+    # Tareas pendientes
+    tasks_text = "No hay tareas pendientes."
+    if user and db:
+        try:
+            from sqlalchemy import select
+            from app.models.task import Task
+            result = await db.execute(
+                select(Task)
+                .where(Task.user_id == user.id)
+                .where(Task.completed == False)
+                .order_by(Task.due_date.asc())
+                .limit(5)
+            )
+            pending_tasks = result.scalars().all()
+            if pending_tasks:
+                lines = []
+                for t in pending_tasks:
+                    due = f" (vence: {t.due_date.strftime('%d/%m/%Y')})" if t.due_date else ""
+                    priority_icon = "🔴" if t.priority == "high" else "🟡" if t.priority == "medium" else "🟢"
+                    lines.append(f"{priority_icon} {t.title}{due}")
+                tasks_text = "\n".join(lines)
+        except Exception as e:
+            logger.error(f"Error cargando tareas: {e}")
+
     # RAG sobre documentos
     rag_context = "No hay documentos cargados."
     try:
@@ -93,31 +117,6 @@ async def stream_chat(messages: list, user=None, db=None):
                 ])
     except Exception as e:
         logger.error(f"Error en RAG: {e}")
-
-# Tareas pendientes
-tasks_text = "No hay tareas pendientes."
-if user and db:
-    try:
-        from sqlalchemy import select
-        from app.models.task import Task
-        from datetime import datetime
-        result = await db.execute(
-            select(Task)
-            .where(Task.user_id == user.id)
-            .where(Task.completed == False)
-            .order_by(Task.due_date.asc())
-            .limit(5)
-        )
-        pending_tasks = result.scalars().all()
-        if pending_tasks:
-            lines = []
-            for t in pending_tasks:
-                due = f" (vence: {t.due_date.strftime('%d/%m/%Y')})" if t.due_date else ""
-                priority_icon = "🔴" if t.priority == "high" else "🟡" if t.priority == "medium" else "🟢"
-                lines.append(f"{priority_icon} {t.title}{due}")
-            tasks_text = "\n".join(lines)
-    except Exception as e:
-        logger.error(f"Error cargando tareas: {e}")
 
     # Búsqueda web
     web_context = "No se realizó búsqueda web."
@@ -132,21 +131,20 @@ if user and db:
             logger.error(f"Error en búsqueda web: {e}")
             yield f"data: {json.dumps('[STATUS:done]')}\n\n"
 
-    
     lang_code = user.language if user and user.language else "es"
     user_language = LANGUAGE_MAP.get(lang_code, "español")
 
     system = SYSTEM_PROMPT.format(
-    user_name=user.name if user else "Usuario",
-    user_role=user.role or "No especificado" if user else "No especificado",
-    user_context=user.context or "No especificado" if user else "No especificado",
-    user_preferences=user.preferences or "No especificado" if user else "No especificado",
-    user_language=user_language,
-    memories=memories_text,
-    rag_context=rag_context,
-    web_context=web_context,
-    fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
-    tasks_context=tasks_text,
+        user_name=user.name if user else "Usuario",
+        user_role=user.role or "No especificado" if user else "No especificado",
+        user_context=user.context or "No especificado" if user else "No especificado",
+        user_preferences=user.preferences or "No especificado" if user else "No especificado",
+        user_language=user_language,
+        memories=memories_text,
+        tasks_context=tasks_text,
+        rag_context=rag_context,
+        web_context=web_context,
+        fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
     )
 
     with client.messages.stream(
