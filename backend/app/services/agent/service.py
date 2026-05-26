@@ -1,10 +1,19 @@
 import anthropic
 import json
 import logging
+import uuid
+from datetime import datetime
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
 from app.services.search.service import web_search, format_results_for_llm
 from app.services.sandbox.service import execute_code
-from datetime import datetime
+from app.services.rag.service import search_documents
+from app.services.memory.service import get_memories
+from app.services.email.service import send_email
+from app.models.task import Task
+from app.models.email_config import EmailConfig
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -15,9 +24,7 @@ RESEARCH_TOOLS = [
         "description": "Busca información actualizada en la web.",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "La búsqueda a realizar"}
-            },
+            "properties": {"query": {"type": "string"}},
             "required": ["query"]
         }
     },
@@ -26,10 +33,62 @@ RESEARCH_TOOLS = [
         "description": "Ejecuta código Python para cálculos o análisis.",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "code": {"type": "string", "description": "El código Python a ejecutar"}
-            },
+            "properties": {"code": {"type": "string"}},
             "required": ["code"]
+        }
+    },
+    {
+        "name": "execute_bash",
+        "description": "Ejecuta scripts Bash para operaciones de sistema.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"code": {"type": "string"}},
+            "required": ["code"]
+        }
+    },
+    {
+        "name": "search_documents",
+        "description": "Busca en los documentos personales del usuario (PDFs, Word, texto).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "read_memories",
+        "description": "Lee las memorias y contexto personal del usuario.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "default": 10}},
+            "required": []
+        }
+    },
+    {
+        "name": "create_task",
+        "description": "Crea una tarea o recordatorio en el sistema del usuario.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title":       {"type": "string"},
+                "description": {"type": "string"},
+                "priority":    {"type": "string", "default": "medium"},
+                "due_date":    {"type": "string", "description": "ISO 8601, ej: 2026-06-01T18:00:00"}
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "send_email",
+        "description": "Envía un email usando la cuenta configurada del usuario.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to":      {"type": "string"},
+                "subject": {"type": "string"},
+                "body":    {"type": "string"}
+            },
+            "required": ["to", "subject", "body"]
         }
     }
 ]
@@ -41,32 +100,102 @@ DOCUMENT_TOOL = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "Título del documento"},
-                "content": {"type": "string", "description": "Contenido completo en Markdown"},
-                "format": {"type": "string", "description": "Formato: md, txt, html", "default": "md"}
+                "title":   {"type": "string"},
+                "content": {"type": "string"},
+                "format":  {"type": "string", "default": "md"}
             },
             "required": ["title", "content"]
         }
     }
 ]
 
+
+async def _execute_tool(tool_name: str, tool_input: dict, user, db: AsyncSession) -> str:
+    try:
+        if tool_name == "web_search":
+            results = await web_search(tool_input["query"], count=5)
+            return format_results_for_llm(results) if results else "Sin resultados."
+
+        elif tool_name == "execute_python":
+            r = await execute_code(tool_input["code"], "python")
+            return r["output"] if r["success"] else f"Error: {r['error']}"
+
+        elif tool_name == "execute_bash":
+            r = await execute_code(tool_input["code"], "bash")
+            return r["output"] if r["success"] else f"Error: {r['error']}"
+
+        elif tool_name == "search_documents":
+            results = search_documents(user.id, tool_input["query"], n_results=5)
+            if not results:
+                return "No se encontraron documentos relevantes."
+            return "\n\n".join([f"[{r['filename']}]: {r['text']}" for r in results])
+
+        elif tool_name == "read_memories":
+            memories = await get_memories(db, user.id, limit=tool_input.get("limit", 10))
+            if not memories:
+                return "No hay memorias guardadas."
+            return "\n".join([f"- {m.content}" for m in memories])
+
+        elif tool_name == "create_task":
+            due = None
+            if tool_input.get("due_date"):
+                try:
+                    due = datetime.fromisoformat(tool_input["due_date"])
+                except ValueError:
+                    pass
+            task = Task(
+                id=str(uuid.uuid4()),
+                user_id=user.id,
+                title=tool_input["title"],
+                description=tool_input.get("description", ""),
+                priority=tool_input.get("priority", "medium"),
+                due_date=due
+            )
+            db.add(task)
+            await db.commit()
+            return f"Tarea creada: '{task.title}' (prioridad: {task.priority})"
+
+        elif tool_name == "send_email":
+            result = await db.execute(
+                select(EmailConfig).where(EmailConfig.user_id == user.id)
+            )
+            config = result.scalar_one_or_none()
+            if not config:
+                return "Error: no hay cuenta de email configurada."
+            success = await send_email(config, to=tool_input["to"],
+                                       subject=tool_input["subject"], body=tool_input["body"])
+            return f"Email enviado a {tool_input['to']}." if success else "Error al enviar el email."
+
+        return f"Herramienta '{tool_name}' no reconocida."
+
+    except Exception as e:
+        logger.error(f"Error en {tool_name}: {e}")
+        return f"Error: {str(e)}"
+
+
 async def run_agent(task: str, user=None, db=None):
     yield f"data: {json.dumps({'type': 'start', 'message': 'Iniciando investigación...'})}\n\n"
 
-    # FASE 1: Recopilar información
     research_messages = [{
         "role": "user",
-        "content": f"Investigá sobre este tema haciendo búsquedas web. Tarea: {task}"
+        "content": (
+            f"Resolvé esta tarea usando las herramientas disponibles.\n"
+            f"Tarea: {task}\n\n"
+            f"Usá las herramientas más adecuadas: web, documentos, memorias, código, tareas, email."
+        )
     }]
 
-    system_research = f"""Eres un investigador. Tu único trabajo es buscar información usando web_search.
-Hacé 2-3 búsquedas relevantes sobre el tema solicitado.
-Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}"""
+    system_research = (
+        f"Sos un agente autónomo con múltiples herramientas. "
+        f"Resolvé la tarea usando las herramientas necesarias. "
+        f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')} | "
+        f"Usuario: {user.name if user else 'Usuario'}"
+    )
 
     collected_info = []
     step = 0
 
-    while step < 5:
+    while step < 8:
         step += 1
         try:
             response = client.messages.create(
@@ -88,51 +217,25 @@ Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}"""
         if response.stop_reason == "tool_use":
             tool_results = []
             for block in response.content:
-                if block.type == "tool_use":
-                    tool_name = block.name
-                    tool_input = block.input
+                if block.type != "tool_use":
+                    continue
 
-                    yield f"data: {json.dumps({'type': 'step', 'tool': tool_name, 'input': str(tool_input)[:200]})}\n\n"
+                tool_input = block.input if isinstance(block.input, dict) else vars(block.input)
 
-                    result = ""
-                    try:
-                        if tool_name == "web_search":
-                            results = await web_search(tool_input["query"], count=5)
-                            result = format_results_for_llm(results) if results else "Sin resultados"
-                            collected_info.append(f"## Búsqueda: {tool_input['query']}\n{result}")
-                        elif tool_name == "execute_python":
-                            exec_result = await execute_code(tool_input["code"], "python")
-                            result = exec_result["output"] if exec_result["success"] else f"Error: {exec_result['error']}"
-                            collected_info.append(f"## Código ejecutado\nOutput: {result}")
-                    except Exception as e:
-                        result = f"Error: {str(e)}"
+                yield f"data: {json.dumps({'type': 'step', 'tool': block.name, 'input': str(tool_input)[:200]})}\n\n"
 
-                    yield f"data: {json.dumps({'type': 'result', 'tool': tool_name, 'result': str(result)[:200]})}\n\n"
+                result = await _execute_tool(block.name, tool_input, user, db)
+                collected_info.append(f"## {block.name}\n{result}")
 
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result
-                    })
+                yield f"data: {json.dumps({'type': 'result', 'tool': block.name, 'result': str(result)[:300]})}\n\n"
+                tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result})
 
             research_messages.append({"role": "user", "content": tool_results})
 
-    # FASE 2: Generar documento (forzado)
+    # FASE 2: Documento final
     yield f"data: {json.dumps({'type': 'step', 'tool': 'create_document', 'input': 'Generando documento final...'})}\n\n"
 
-    all_info = "\n\n".join(collected_info) if collected_info else "No se encontró información específica."
-
-    doc_messages = [{
-        "role": "user",
-        "content": f"""Basándote en esta información recopilada, creá un documento completo y bien estructurado en Markdown.
-
-TAREA ORIGINAL: {task}
-
-INFORMACIÓN RECOPILADA:
-{all_info}
-
-Usá create_document con el contenido completo y bien formateado."""
-    }]
+    all_info = "\n\n".join(collected_info) if collected_info else "Sin información adicional."
 
     try:
         doc_response = client.messages.create(
@@ -140,31 +243,26 @@ Usá create_document con el contenido completo y bien formateado."""
             max_tokens=4096,
             tools=DOCUMENT_TOOL,
             tool_choice={"type": "tool", "name": "create_document"},
-            messages=doc_messages
+            messages=[{"role": "user", "content": (
+                f"Creá un documento completo en Markdown.\n"
+                f"TAREA: {task}\n\nINFORMACIÓN:\n{all_info}"
+            )}]
         )
 
         for block in doc_response.content:
-            if block.type == "tool_use" and block.name == "create_document":
-                if isinstance(block.input, dict):
-                    content = block.input.get("content", "")
-                    title = block.input.get("title", "documento")
-                    fmt = block.input.get("format", "md")
-                else:
-                    content = getattr(block.input, "content", "")
-                    title = getattr(block.input, "title", "documento")
-                    fmt = getattr(block.input, "format", "md")
-
-                if not content:
-                    yield f"data: {json.dumps({'type': 'error', 'message': 'Error: documento vacío'})}\n\n"
-                    return
-
-                yield f"data: {json.dumps({'type': 'document', 'title': title, 'content': content, 'format': fmt})}\n\n"
-                yield f"data: {json.dumps({'type': 'complete', 'message': ''})}\n\n"
+            if block.type != "tool_use" or block.name != "create_document":
+                continue
+            inp = block.input if isinstance(block.input, dict) else vars(block.input)
+            content = inp.get("content", "")
+            if not content:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Documento vacío.'})}\n\n"
                 return
+            yield f"data: {json.dumps({'type': 'document', 'title': inp.get('title', 'documento'), 'content': content, 'format': inp.get('format', 'md')})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'message': ''})}\n\n"
+            return
 
     except Exception as e:
         logger.error(f"Error generando documento: {e}")
         yield f"data: {json.dumps({'type': 'error', 'message': f'Error generando documento: {str(e)}'})}\n\n"
-        return
 
-    yield f"data: {json.dumps({'type': 'complete', 'message': 'Investigación completada.'})}\n\n"
+    yield f"data: {json.dumps({'type': 'complete', 'message': 'Tarea completada.'})}\n\n"
