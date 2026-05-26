@@ -9,10 +9,10 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-AGENT_TOOLS = [
+RESEARCH_TOOLS = [
     {
         "name": "web_search",
-        "description": "Busca información actualizada en la web. Usá cuando necesitás datos recientes o específicos.",
+        "description": "Busca información actualizada en la web.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -23,7 +23,7 @@ AGENT_TOOLS = [
     },
     {
         "name": "execute_python",
-        "description": "Ejecuta código Python para cálculos, análisis de datos o procesamiento.",
+        "description": "Ejecuta código Python para cálculos o análisis.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -31,15 +31,18 @@ AGENT_TOOLS = [
             },
             "required": ["code"]
         }
-    },
+    }
+]
+
+DOCUMENT_TOOL = [
     {
         "name": "create_document",
-        "description": "Crea un documento con el contenido generado. Usá al final para entregar el resultado.",
+        "description": "Crea el documento final con todo el contenido.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "Título del documento"},
-                "content": {"type": "string", "description": "Contenido en Markdown"},
+                "content": {"type": "string", "description": "Contenido completo en Markdown"},
                 "format": {"type": "string", "description": "Formato: md, txt, html", "default": "md"}
             },
             "required": ["title", "content"]
@@ -48,61 +51,42 @@ AGENT_TOOLS = [
 ]
 
 async def run_agent(task: str, user=None, db=None):
-    """
-    Ejecuta el agente autónomo enviando eventos SSE con el progreso.
-    Yields: eventos SSE con el estado de cada paso
-    """
-    messages = [{"role": "user", "content": task}]
-    
-    system = f"""Eres MATE, un agente autónomo inteligente creado por JJRM.
-Tu objetivo es completar tareas complejas paso a paso usando las herramientas disponibles.
+    yield f"data: {json.dumps({'type': 'start', 'message': 'Iniciando investigación...'})}\n\n"
 
-Reglas:
-- Planificá antes de actuar
-- Usá las herramientas en orden lógico
-- Buscá información actualizada cuando sea necesario
-- Al finalizar, siempre creá un documento con el resultado usando create_document
-- Sé conciso en los pasos intermedios
-- Fecha actual: {datetime.now().strftime('%d/%m/%Y %H:%M')}
-- Usuario: {user.name if user else 'Usuario'}"""
+    # FASE 1: Recopilar información
+    research_messages = [{
+        "role": "user",
+        "content": f"Investigá sobre este tema haciendo búsquedas web. Tarea: {task}"
+    }]
 
+    system_research = f"""Eres un investigador. Tu único trabajo es buscar información usando web_search.
+Hacé 2-3 búsquedas relevantes sobre el tema solicitado.
+Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}"""
+
+    collected_info = []
     step = 0
-    max_steps = 10
 
-    yield f"data: {json.dumps({'type': 'start', 'message': 'Iniciando agente...'})}\n\n"
-
-    while step < max_steps:
+    while step < 5:
         step += 1
-
         try:
             response = client.messages.create(
                 model="claude-sonnet-4-5",
-                max_tokens=4096,
-                system=system,
-                tools=AGENT_TOOLS,
-                messages=messages
+                max_tokens=2048,
+                system=system_research,
+                tools=RESEARCH_TOOLS,
+                messages=research_messages
             )
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             return
 
-        # Agregar respuesta del asistente al historial
-        messages.append({"role": "assistant", "content": response.content})
+        research_messages.append({"role": "assistant", "content": response.content})
 
-        # Procesar la respuesta
         if response.stop_reason == "end_turn":
-            # Respuesta final sin herramientas
-            final_text = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    final_text += block.text
+            break
 
-            yield f"data: {json.dumps({'type': 'complete', 'message': final_text})}\n\n"
-            return
-
-        elif response.stop_reason == "tool_use":
+        if response.stop_reason == "tool_use":
             tool_results = []
-
             for block in response.content:
                 if block.type == "tool_use":
                     tool_name = block.name
@@ -110,32 +94,20 @@ Reglas:
 
                     yield f"data: {json.dumps({'type': 'step', 'tool': tool_name, 'input': str(tool_input)[:200]})}\n\n"
 
-                    # Ejecutar la herramienta
                     result = ""
                     try:
                         if tool_name == "web_search":
                             results = await web_search(tool_input["query"], count=5)
                             result = format_results_for_llm(results) if results else "Sin resultados"
-
+                            collected_info.append(f"## Búsqueda: {tool_input['query']}\n{result}")
                         elif tool_name == "execute_python":
                             exec_result = await execute_code(tool_input["code"], "python")
-                            if exec_result["success"]:
-                                result = exec_result["output"] or "Código ejecutado sin output"
-                            else:
-                                result = f"Error: {exec_result['error']}"
-
-                        elif tool_name == "create_document":
-                            content = tool_input["content"]
-                            title = tool_input.get("title", "documento")
-                            result = f"Documento '{title}' creado con {len(content)} caracteres"
-                            # Enviar el documento al frontend
-                            yield f"data: {json.dumps({'type': 'document', 'title': title, 'content': content, 'format': tool_input.get('format', 'md')})}\n\n"
-
+                            result = exec_result["output"] if exec_result["success"] else f"Error: {exec_result['error']}"
+                            collected_info.append(f"## Código ejecutado\nOutput: {result}")
                     except Exception as e:
-                        result = f"Error ejecutando {tool_name}: {str(e)}"
-                        logger.error(f"Agent tool error: {e}")
+                        result = f"Error: {str(e)}"
 
-                    yield f"data: {json.dumps({'type': 'result', 'tool': tool_name, 'result': str(result)[:300]})}\n\n"
+                    yield f"data: {json.dumps({'type': 'result', 'tool': tool_name, 'result': str(result)[:200]})}\n\n"
 
                     tool_results.append({
                         "type": "tool_result",
@@ -143,12 +115,56 @@ Reglas:
                         "content": result
                     })
 
-            # Agregar resultados al historial
-            messages.append({"role": "user", "content": tool_results})
+            research_messages.append({"role": "user", "content": tool_results})
 
-        else:
-            # Stop reason desconocido
-            yield f"data: {json.dumps({'type': 'complete', 'message': 'Tarea completada.'})}\n\n"
-            return
+    # FASE 2: Generar documento (forzado)
+    yield f"data: {json.dumps({'type': 'step', 'tool': 'create_document', 'input': 'Generando documento final...'})}\n\n"
 
-    yield f"data: {json.dumps({'type': 'error', 'message': 'Se alcanzó el límite de pasos del agente.'})}\n\n"
+    all_info = "\n\n".join(collected_info) if collected_info else "No se encontró información específica."
+
+    doc_messages = [{
+        "role": "user",
+        "content": f"""Basándote en esta información recopilada, creá un documento completo y bien estructurado en Markdown.
+
+TAREA ORIGINAL: {task}
+
+INFORMACIÓN RECOPILADA:
+{all_info}
+
+Usá create_document con el contenido completo y bien formateado."""
+    }]
+
+    try:
+        doc_response = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=4096,
+            tools=DOCUMENT_TOOL,
+            tool_choice={"type": "tool", "name": "create_document"},
+            messages=doc_messages
+        )
+
+        for block in doc_response.content:
+            if block.type == "tool_use" and block.name == "create_document":
+                if isinstance(block.input, dict):
+                    content = block.input.get("content", "")
+                    title = block.input.get("title", "documento")
+                    fmt = block.input.get("format", "md")
+                else:
+                    content = getattr(block.input, "content", "")
+                    title = getattr(block.input, "title", "documento")
+                    fmt = getattr(block.input, "format", "md")
+
+                if not content:
+                    yield f"data: {json.dumps({'type': 'error', 'message': 'Error: documento vacío'})}\n\n"
+                    return
+
+                yield f"data: {json.dumps({'type': 'document', 'title': title, 'content': content, 'format': fmt})}\n\n"
+                yield f"data: {json.dumps({'type': 'complete', 'message': ''})}\n\n"
+                return
+
+    except Exception as e:
+        logger.error(f"Error generando documento: {e}")
+        yield f"data: {json.dumps({'type': 'error', 'message': f'Error generando documento: {str(e)}'})}\n\n"
+        return
+
+    yield f"data: {json.dumps({'type': 'complete', 'message': 'Investigación completada.'})}\n\n"
