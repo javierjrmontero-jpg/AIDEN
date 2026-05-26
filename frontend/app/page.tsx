@@ -37,6 +37,8 @@ export default function Home() {
   const [searchResults, setSearchResults] = useState<Conversation[]>([]);
   const [searchingConv, setSearchingConv] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { notifications, notify, dismiss } = useNotifications();
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [voiceLang, setVoiceLang] = useState("es-AR");
@@ -176,7 +178,36 @@ useEffect(() => {
     } catch (e) { console.error(e); }
   };
 
-  const newConversation = () => { setMessages([]); setConversationId(null); };
+  const newConversation = useCallback(() => { setMessages([]); setConversationId(null); }, []);
+// Atajos de teclado globales
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "n") {
+        e.preventDefault();
+        newConversation();
+        textareaRef.current?.focus();
+      }
+      if (e.ctrlKey && e.key === "k") {
+        e.preventDefault();
+        if (!sidebarOpen) setSidebarOpen(true);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+      }
+      if (e.ctrlKey && e.key === "b") {
+        e.preventDefault();
+        setSidebarOpen(prev => !prev);
+      }
+      if (e.key === "Escape") {
+        if (searchQuery) {
+          setSearchQuery("");
+          setSearchResults([]);
+        } else {
+          textareaRef.current?.blur();
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [sidebarOpen, searchQuery, newConversation]);
 
   const deleteConversation = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -303,6 +334,7 @@ if (ttsEnabled) {
               <span className="font-semibold text-sm">MATE</span>
             </div>
             <button onClick={newConversation}
+              title="Ctrl+N"
               className="w-full px-3 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium transition-colors mb-2">
               + Nueva conversación
             </button>
@@ -316,8 +348,9 @@ if (ttsEnabled) {
                   setSearchQuery(e.target.value);
                   searchConversations(e.target.value);
                 }}
+                ref={searchInputRef}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs outline-none focus:border-emerald-500 transition-colors placeholder-gray-600 text-gray-300"
-              />
+                />
               {searchQuery && (
                 <button
                   onClick={() => { setSearchQuery(""); setSearchResults([]); }}
@@ -524,6 +557,7 @@ if (ttsEnabled) {
        <div className="px-4 py-4 border-t border-gray-800 bg-gray-900">
           <div className="flex gap-2 max-w-4xl mx-auto items-end">
             <textarea
+              ref={textareaRef}
               className="flex-1 bg-gray-800 text-gray-100 rounded-xl px-4 py-3 text-sm resize-none outline-none border border-gray-700 focus:border-emerald-500 transition-colors placeholder-gray-500 min-w-0"
               placeholder="Escribí tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)"
               rows={1}
