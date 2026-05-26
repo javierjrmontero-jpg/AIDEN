@@ -33,6 +33,7 @@ export default function Home() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Conversation[]>([]);
   const [searchingConv, setSearchingConv] = useState(false);
@@ -168,13 +169,14 @@ useEffect(() => {
     }
   }, [token, authHeaders]);
 
-  const loadConversation = async (id: string) => {
+ const loadConversation = async (id: string) => {
     if (!token) return;
     try {
       const res = await fetch(`${API_URL}/api/v1/conversations/${id}/messages`, { headers: authHeaders() });
       const data = await res.json();
       setMessages(data.map((m: any) => ({ role: m.role, content: m.content })));
       setConversationId(id);
+      if (isMobile) setSidebarOpen(false);
     } catch (e) { console.error(e); }
   };
 
@@ -208,6 +210,18 @@ useEffect(() => {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [sidebarOpen, searchQuery, newConversation]);
+
+// Detectar mobile
+  useEffect(() => {
+    const check = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) setSidebarOpen(false);
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   const deleteConversation = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -325,8 +339,11 @@ if (ttsEnabled) {
 
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100 overflow-hidden">
+      {sidebarOpen && isMobile && (
+        <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setSidebarOpen(false)} />
+      )}
       {sidebarOpen && (
-       <div className="w-64 flex flex-col border-r border-gray-800 bg-gray-900 overflow-hidden">
+       <div className={`${isMobile ? "fixed inset-y-0 left-0 z-50" : "relative"} w-64 flex flex-col border-r border-gray-800 bg-gray-900 overflow-hidden`}>
           {/* Header sidebar */}
           <div className="px-4 py-4 border-b border-gray-800">
             <div className="flex items-center gap-2 mb-3">
@@ -482,7 +499,7 @@ if (ttsEnabled) {
               : "Nueva conversación"}
           </span>
           <div className="flex items-center gap-3 ml-auto">
-            <span className="text-xs text-gray-500">Motor de Asistencia Técnica e Inteligencia by JJRM</span>
+            <span className="text-xs text-gray-500 hidden md:inline">Motor de Asistencia Técnica e Inteligencia by JJRM</span>
             <span className="text-xs text-emerald-400 font-medium">{user.name}</span>
             <button onClick={logout} className="text-xs text-gray-500 hover:text-red-400 transition-colors">Salir</button>
           </div>
@@ -555,7 +572,7 @@ if (ttsEnabled) {
         </div>
 
        <div className="px-4 py-4 border-t border-gray-800 bg-gray-900">
-          <div className="flex gap-2 max-w-4xl mx-auto items-end">
+         <div className="flex gap-2 max-w-4xl mx-auto items-end w-full">
             <textarea
               ref={textareaRef}
               className="flex-1 bg-gray-800 text-gray-100 rounded-xl px-4 py-3 text-sm resize-none outline-none border border-gray-700 focus:border-emerald-500 transition-colors placeholder-gray-500 min-w-0"
