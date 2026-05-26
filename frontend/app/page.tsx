@@ -182,7 +182,7 @@ useEffect(() => {
 // Atajos de teclado globales
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === "n") {
+     if (e.ctrlKey && e.shiftKey && e.key === "N") {
         e.preventDefault();
         newConversation();
         textareaRef.current?.focus();
@@ -334,7 +334,7 @@ if (ttsEnabled) {
               <span className="font-semibold text-sm">MATE</span>
             </div>
             <button onClick={newConversation}
-              title="Ctrl+N"
+              title="Ctrl+Shift+N"
               className="w-full px-3 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium transition-colors mb-2">
               + Nueva conversación
             </button>
