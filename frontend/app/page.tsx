@@ -411,6 +411,11 @@ if (ttsEnabled) {
             <span className="text-sm">📧</span>
             <span className="text-xs text-gray-400">Email</span>
           </button>
+          <button onClick={() => router.push("/agent")}
+  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-emerald-900 transition-colors">
+  <span className="text-sm">🤖</span>
+  <span className="text-xs text-gray-400">Agente</span>
+</button>
           <button onClick={() => router.push("/stats")}
   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
   <span className="text-sm">📊</span>
