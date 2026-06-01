@@ -2,10 +2,10 @@ import anthropic
 import json
 import logging
 import uuid
+
 from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.config import settings
 from app.services.search.service import web_search, format_results_for_llm
 from app.services.sandbox.service import execute_code
@@ -14,6 +14,8 @@ from app.services.memory.service import get_memories
 from app.services.email.service import send_email
 from app.models.task import Task
 from app.models.email_config import EmailConfig
+from app.services.calendar.service import list_upcoming_events, create_event, format_events_for_prompt
+from app.models.calendar_config import CalendarConfig
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -89,6 +91,33 @@ RESEARCH_TOOLS = [
                 "body":    {"type": "string"}
             },
             "required": ["to", "subject", "body"]
+        }
+    },
+    {
+        "name": "get_calendar_events",
+        "description": "Lee los próximos eventos del calendario del usuario.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days":  {"type": "integer", "default": 7},
+                "limit": {"type": "integer", "default": 10}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "create_calendar_event",
+        "description": "Crea un evento en el calendario del usuario.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary":     {"type": "string"},
+                "start":       {"type": "string", "description": "ISO 8601, ej: 2026-06-01T18:00:00 (o 2026-06-01 día completo)"},
+                "end":         {"type": "string", "description": "ISO 8601 opcional; por defecto +1h"},
+                "description": {"type": "string"},
+                "location":    {"type": "string"}
+            },
+            "required": ["summary", "start"]
         }
     }
 ]
@@ -166,6 +195,39 @@ async def _execute_tool(tool_name: str, tool_input: dict, user, db: AsyncSession
                                        subject=tool_input["subject"], body=tool_input["body"])
             return f"Email enviado a {tool_input['to']}." if success else "Error al enviar el email."
 
+        elif tool_name == "get_calendar_events":
+            r = await db.execute(
+                select(CalendarConfig)
+                .where(CalendarConfig.user_id == user.id)
+                .where(CalendarConfig.enabled == True)
+            )
+            cfg = r.scalar_one_or_none()
+            if not cfg:
+                return "No hay calendario conectado."
+            events = await list_upcoming_events(
+                cfg, max_results=tool_input.get("limit", 10), days_ahead=tool_input.get("days", 7)
+            )
+            return format_events_for_prompt(events)
+
+        elif tool_name == "create_calendar_event":
+            r = await db.execute(
+                select(CalendarConfig)
+                .where(CalendarConfig.user_id == user.id)
+                .where(CalendarConfig.enabled == True)
+            )
+            cfg = r.scalar_one_or_none()
+            if not cfg:
+                return "Error: no hay calendario conectado."
+            ev = await create_event(
+                cfg,
+                summary=tool_input["summary"],
+                start_iso=tool_input["start"],
+                end_iso=tool_input.get("end", ""),
+                description=tool_input.get("description", ""),
+                location=tool_input.get("location", ""),
+            )
+            return f"Evento creado: '{ev['summary']}' el {ev['start']}. {ev.get('html_link','')}"
+
         return f"Herramienta '{tool_name}' no reconocida."
 
     except Exception as e:
@@ -181,7 +243,7 @@ async def run_agent(task: str, user=None, db=None):
         "content": (
             f"Resolvé esta tarea usando las herramientas disponibles.\n"
             f"Tarea: {task}\n\n"
-            f"Usá las herramientas más adecuadas: web, documentos, memorias, código, tareas, email."
+            f"Usá las herramientas más adecuadas: web, documentos, memorias, código, tareas, email, calendario."
         )
     }]
 

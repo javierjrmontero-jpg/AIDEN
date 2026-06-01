@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     JWT_EXPIRE_HOURS: int = 24
     BRAVE_SEARCH_API_KEY: str = ""
     SEARCH_ENABLED: bool = True
-
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_CALENDAR_ENABLED: bool = True
     class Config:
         env_file = ".env"
 

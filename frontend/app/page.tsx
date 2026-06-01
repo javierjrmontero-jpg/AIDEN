@@ -175,7 +175,7 @@ useEffect(() => {
       const res = await fetch(`${API_URL}/api/v1/conversations/${id}/messages`, { headers: authHeaders() });
       const data = await res.json();
       setMessages(data.map((m: any) => ({ role: m.role, content: m.content })));
-      setConversationId(id);
+     setConversationId(id);
       if (isMobile) setSidebarOpen(false);
     } catch (e) { console.error(e); }
   };

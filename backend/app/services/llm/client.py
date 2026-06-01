@@ -39,6 +39,9 @@ SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un a
 ## Emails no leídos
 {emails_context}
 
+## Próximos eventos de tu calendario
+{calendar_context}
+
 ## Documentos del usuario (RAG)
 {rag_context}
 
@@ -131,6 +134,25 @@ async def stream_chat(messages: list, user=None, db=None):
         except Exception as e:
             logger.error(f"Error cargando emails: {e}")
 
+# Próximos eventos de calendario
+    calendar_text = "No hay calendario conectado."
+    if user and db:
+        try:
+            from sqlalchemy import select
+            from app.models.calendar_config import CalendarConfig
+            from app.services.calendar.service import list_upcoming_events, format_events_for_prompt
+            result = await db.execute(
+                select(CalendarConfig)
+                .where(CalendarConfig.user_id == user.id)
+                .where(CalendarConfig.enabled == True)
+            )
+            cal_config = result.scalar_one_or_none()
+            if cal_config:
+                events = await list_upcoming_events(cal_config, max_results=5, days_ahead=7)
+                calendar_text = format_events_for_prompt(events)
+        except Exception as e:
+            logger.error(f"Error cargando calendario: {e}")
+
     # RAG sobre documentos
     rag_context = "No hay documentos cargados."
     try:
@@ -171,7 +193,9 @@ async def stream_chat(messages: list, user=None, db=None):
         emails_context=emails_text,
         rag_context=rag_context,
         web_context=web_context,
-        fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
+        calendar_context=calendar_text,
+        fecha=datetime.now().strftime("%d/%m/%Y %H:%M"),
+        
     )
 
     with client.messages.stream(
