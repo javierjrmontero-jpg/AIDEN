@@ -126,7 +126,7 @@ useEffect(() => {
       const tasks = await res.json();
       const now = new Date();
 
-      tasks.forEach((task: any) => {
+      (Array.isArray(tasks) ? tasks : []).forEach((task: any) => {
         if (!task.due_date) return;
         const due = new Date(task.due_date);
         const diffMs = due.getTime() - now.getTime();
@@ -460,6 +460,11 @@ if (ttsEnabled) {
             className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
             <span className="text-sm">📧</span>
             <span className="text-xs text-gray-400">Email</span>
+          </button>
+          <button onClick={() => router.push("/calendar")}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+            <span className="text-sm">📅</span>
+            <span className="text-xs text-gray-400">Calendario</span>
           </button>
           <button onClick={() => router.push("/agent")}
   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-emerald-900 transition-colors">
