@@ -7,6 +7,10 @@ RUN npm install
 
 COPY . .
 
+# Compila el bundle de producción (sin hot-reload)
+RUN npm run build
+
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+# Sirve el build optimizado
+CMD ["npm", "run", "start"]
