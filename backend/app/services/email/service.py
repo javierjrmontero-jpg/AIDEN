@@ -7,6 +7,8 @@ from email.header import decode_header
 import logging
 from typing import Optional
 
+from app.services.email import graph
+
 logger = logging.getLogger(__name__)
 
 PROVIDER_CONFIG = {
@@ -19,7 +21,7 @@ PROVIDER_CONFIG = {
     "outlook": {
         "imap_host": "outlook.office365.com",
         "imap_port": 993,
-        "smtp_host": "smtp.office365.com",
+        "smtp_host": "smtp-mail.outlook.com",
         "smtp_port": 587
     },
     "yahoo": {
@@ -29,6 +31,11 @@ PROVIDER_CONFIG = {
         "smtp_port": 587
     }
 }
+
+
+def _is_oauth(config) -> bool:
+    return getattr(config, "auth_type", "basic") == "oauth"
+
 
 def decode_str(s):
     if s is None:
@@ -41,6 +48,7 @@ def decode_str(s):
         else:
             result += str(part)
     return result
+
 
 def get_email_body(msg) -> str:
     body = ""
@@ -61,13 +69,21 @@ def get_email_body(msg) -> str:
             pass
     return body[:3000]  # Limitar a 3000 chars
 
+
 def connect_imap(config) -> imaplib.IMAP4_SSL:
-    imap = imaplib.IMAP4_SSL(config.imap_host or PROVIDER_CONFIG.get(config.provider, {}).get("imap_host"), 
+    imap = imaplib.IMAP4_SSL(config.imap_host or PROVIDER_CONFIG.get(config.provider, {}).get("imap_host"),
                               config.imap_port or 993)
     imap.login(config.email_address, config.app_password)
     return imap
 
+
 async def fetch_inbox(config, limit: int = 10) -> list:
+    # --- Outlook / Graph ---
+    if _is_oauth(config):
+        token = await graph.get_access_token(config.oauth_refresh_token)
+        return await graph.fetch_inbox_graph(token, limit)
+
+    # --- IMAP (Gmail, etc.) ---
     try:
         imap = connect_imap(config)
         imap.select("INBOX")
@@ -97,7 +113,14 @@ async def fetch_inbox(config, limit: int = 10) -> list:
         logger.error(f"Error fetching inbox: {e}")
         raise Exception(f"Error al conectar con el email: {str(e)}")
 
+
 async def fetch_unread(config, limit: int = 10) -> list:
+    # --- Outlook / Graph ---
+    if _is_oauth(config):
+        token = await graph.get_access_token(config.oauth_refresh_token)
+        return await graph.fetch_unread_graph(token, limit)
+
+    # --- IMAP (Gmail, etc.) ---
     try:
         imap = connect_imap(config)
         imap.select("INBOX")
@@ -127,7 +150,14 @@ async def fetch_unread(config, limit: int = 10) -> list:
         logger.error(f"Error fetching unread: {e}")
         raise Exception(f"Error al obtener emails no leídos: {str(e)}")
 
+
 async def send_email(config, to: str, subject: str, body: str) -> bool:
+    # --- Outlook / Graph ---
+    if _is_oauth(config):
+        token = await graph.get_access_token(config.oauth_refresh_token)
+        return await graph.send_mail_graph(token, to, subject, body)
+
+    # --- SMTP (Gmail, etc.) ---
     try:
         smtp_host = config.smtp_host or PROVIDER_CONFIG.get(config.provider, {}).get("smtp_host")
         smtp_port = config.smtp_port or 587

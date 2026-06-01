@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_CALENDAR_ENABLED: bool = True
+    MICROSOFT_CLIENT_ID: str = ""
     class Config:
         env_file = ".env"
 

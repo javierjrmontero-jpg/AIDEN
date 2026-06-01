@@ -95,7 +95,35 @@ export default function Email() {
     } catch (e) { console.error(e); }
     finally { setSaving(false); }
   };
+const [outlookToken, setOutlookToken] = useState("");
+  const [connectingOutlook, setConnectingOutlook] = useState(false);
+  const [outlookMsg, setOutlookMsg] = useState("");
 
+  const connectOutlook = async () => {
+    if (!token || !outlookToken.trim()) return;
+    setConnectingOutlook(true);
+    setOutlookMsg("");
+    try {
+      const res = await fetch("/api/v1/email/config/outlook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ refresh_token: outlookToken.trim() })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOutlookMsg(`Conectado: ${data.email_address}`);
+        setOutlookToken("");
+        loadAccounts(token);
+      } else {
+        setOutlookMsg(data.detail || "Error al conectar");
+      }
+    } catch {
+      setOutlookMsg("Error de red");
+    } finally {
+      setConnectingOutlook(false);
+    }
+  };
+  
   const deleteAccount = async (id: string) => {
     if (!token) return;
     await fetch(`/api/v1/email/config/${id}`, {
@@ -413,6 +441,36 @@ export default function Email() {
                     </>
                   ) : saved ? "✓ Cuenta agregada" : "Agregar cuenta"}
                 </button>
+              </div>
+            </div>
+            {/* Conectar Outlook (Microsoft Graph / OAuth) */}
+            <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+              <h3 className="text-sm font-semibold mb-1">🔵 Conectar Outlook / Hotmail</h3>
+              <p className="text-xs text-gray-500 mb-4">
+                Outlook usa OAuth (no app password). Generá el refresh token con{" "}
+                <code className="text-emerald-500">scripts/microsoft_email_auth.py</code> en tu PC y pegalo acá.
+              </p>
+              <div className="space-y-3">
+                <textarea
+                  placeholder="Refresh token de Microsoft (1//... o 0.A...)"
+                  value={outlookToken}
+                  onChange={(e) => setOutlookToken(e.target.value)}
+                  rows={3}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500 transition-colors placeholder-gray-600 resize-none text-gray-100"
+                />
+                <button
+                  onClick={connectOutlook}
+                  disabled={connectingOutlook || !outlookToken.trim()}
+                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  {connectingOutlook ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Conectando...
+                    </>
+                  ) : "Conectar Outlook"}
+                </button>
+                {outlookMsg && <p className="text-xs text-gray-400">{outlookMsg}</p>}
               </div>
             </div>
           </div>

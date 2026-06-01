@@ -8,6 +8,7 @@ from app.core.auth import get_current_user
 from app.models.user import User
 from app.models.email_config import EmailConfig
 from app.services.email.service import fetch_inbox, fetch_unread, send_email, PROVIDER_CONFIG
+from app.services.email import graph
 from datetime import datetime
 import uuid
 
@@ -21,6 +22,9 @@ class EmailConfigCreate(BaseModel):
     imap_port: Optional[int] = None
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = None
+
+class OutlookConnectRequest(BaseModel):
+    refresh_token: str
 
 class SendEmailRequest(BaseModel):
     to: str
@@ -44,6 +48,7 @@ async def get_email_configs(
             "id": c.id,
             "provider": c.provider,
             "email_address": c.email_address,
+            "auth_type": c.auth_type,
             "enabled": c.enabled
         }
         for c in configs
@@ -69,6 +74,7 @@ async def add_email_config(
         # Actualizar la existente
         existing.provider = request.provider
         existing.app_password = request.app_password
+        existing.auth_type = "basic"
         existing.imap_host = request.imap_host or provider_defaults.get("imap_host")
         existing.imap_port = request.imap_port or provider_defaults.get("imap_port", 993)
         existing.smtp_host = request.smtp_host or provider_defaults.get("smtp_host")
@@ -82,6 +88,7 @@ async def add_email_config(
             provider=request.provider,
             email_address=request.email_address,
             app_password=request.app_password,
+            auth_type="basic",
             imap_host=request.imap_host or provider_defaults.get("imap_host"),
             imap_port=request.imap_port or provider_defaults.get("imap_port", 993),
             smtp_host=request.smtp_host or provider_defaults.get("smtp_host"),
@@ -91,6 +98,50 @@ async def add_email_config(
 
     await db.commit()
     return {"status": "saved"}
+
+@router.post("/email/config/outlook")
+async def connect_outlook(
+    request: OutlookConnectRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Validar el refresh_token contra Graph y obtener el email de la cuenta
+    try:
+        access_token = await graph.get_access_token(request.refresh_token)
+        email_address = await graph.get_profile_email(access_token)
+    except Exception as ex:
+        raise HTTPException(400, f"Token inválido o sin permisos: {ex}")
+
+    if not email_address:
+        raise HTTPException(400, "No se pudo obtener el email de la cuenta")
+
+    result = await db.execute(
+        select(EmailConfig)
+        .where(EmailConfig.user_id == current_user.id)
+        .where(EmailConfig.email_address == email_address)
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.provider = "outlook"
+        existing.auth_type = "oauth"
+        existing.oauth_refresh_token = request.refresh_token
+        existing.app_password = ""
+        existing.enabled = True
+        existing.updated_at = datetime.utcnow()
+    else:
+        db.add(EmailConfig(
+            id=str(uuid.uuid4()),
+            user_id=current_user.id,
+            provider="outlook",
+            email_address=email_address,
+            app_password="",
+            auth_type="oauth",
+            oauth_refresh_token=request.refresh_token,
+        ))
+
+    await db.commit()
+    return {"status": "connected", "email_address": email_address}
 
 @router.delete("/email/config/{config_id}")
 async def delete_email_config(
