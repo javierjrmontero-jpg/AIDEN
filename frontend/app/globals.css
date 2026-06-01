@@ -37,9 +37,10 @@ nextjs-portal {
 .animate-fade-in {
   animation: fade-in 0.3s ease-out;
 }
-/* Ocultar scrollbar del body */
+/* Permitir scroll vertical en páginas largas, sin scroll horizontal */
 body {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* Scrollbar estilizada solo donde se necesita */

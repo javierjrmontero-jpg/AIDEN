@@ -413,7 +413,6 @@ const [outlookToken, setOutlookToken] = useState("");
                   <select value={provider} onChange={(e) => setProvider(e.target.value)}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500 transition-colors text-gray-100">
                     <option value="gmail">🔴 Gmail</option>
-                    <option value="outlook">🔵 Outlook / Hotmail</option>
                     <option value="yahoo">🟣 Yahoo Mail</option>
                   </select>
                 </div>
