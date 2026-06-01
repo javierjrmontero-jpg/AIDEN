@@ -25,6 +25,33 @@ DEFAULT_TZ = "America/Argentina/Buenos_Aires"  # UTC-3, válido para toda Argent
 
 
 # --------------------------------------------------------------------------- #
+# Normalización de fechas
+# --------------------------------------------------------------------------- #
+def _is_all_day(value: str) -> bool:
+    """True si el valor es solo fecha (YYYY-MM-DD), sin hora."""
+    return len(value.strip()) == 10 and value.count("-") == 2 and "T" not in value
+
+
+def _normalize_datetime(value: str) -> str:
+    """
+    Convierte la entrada a RFC3339 que Google acepta.
+    - 'YYYY-MM-DD'              -> evento de día completo (se devuelve igual)
+    - 'YYYY-MM-DDTHH:MM'        -> agrega ':00' segundos
+    - 'YYYY-MM-DDTHH:MM:SS'     -> se deja igual
+    El input datetime-local del navegador no manda segundos, de ahí el ajuste.
+    """
+    value = value.strip()
+    if _is_all_day(value):
+        return value
+    # Reemplaza espacio por 'T' por si viene 'YYYY-MM-DD HH:MM'
+    value = value.replace(" ", "T")
+    # Si tiene formato YYYY-MM-DDTHH:MM (16 chars) -> faltan los segundos
+    if len(value) == 16:
+        value = value + ":00"
+    return value
+
+
+# --------------------------------------------------------------------------- #
 # Helpers síncronos (se ejecutan en thread aparte)
 # --------------------------------------------------------------------------- #
 def _credentials(refresh_token: str) -> Credentials:
@@ -95,10 +122,15 @@ def _create_sync(
     if location:
         body["location"] = location
 
-    # Evento de día completo si la fecha viene como YYYY-MM-DD (10 chars)
-    if len(start_iso) == 10:
+    if _is_all_day(start_iso):
+        # Evento de día completo. El 'end.date' en Google es EXCLUSIVO:
+        # para un evento de un día, end = start + 1 día.
+        end_date = end_iso if (end_iso and _is_all_day(end_iso)) else None
+        if not end_date:
+            d = datetime.strptime(start_iso, "%Y-%m-%d") + timedelta(days=1)
+            end_date = d.strftime("%Y-%m-%d")
         body["start"] = {"date": start_iso}
-        body["end"] = {"date": end_iso or start_iso}
+        body["end"] = {"date": end_date}
     else:
         body["start"] = {"dateTime": start_iso, "timeZone": tz}
         body["end"] = {"dateTime": end_iso, "timeZone": tz}
@@ -139,19 +171,24 @@ async def create_event(
     location: str = "",
     tz: str = DEFAULT_TZ,
 ):
-    # Duración por defecto 1h si se pasó hora de inicio sin fin
-    if not end_iso and len(start_iso) > 10:
+    # Normaliza fechas (agrega segundos si faltan, etc.)
+    start_norm = _normalize_datetime(start_iso)
+    end_norm = _normalize_datetime(end_iso) if end_iso else ""
+
+    # Si hay hora de inicio pero no de fin -> +1h por defecto
+    if not end_norm and not _is_all_day(start_norm):
         try:
-            end_iso = (datetime.fromisoformat(start_iso) + timedelta(hours=1)).isoformat()
+            end_norm = (datetime.fromisoformat(start_norm) + timedelta(hours=1)).isoformat()
         except ValueError:
-            end_iso = start_iso
+            end_norm = start_norm
+
     return await asyncio.to_thread(
         _create_sync,
         config.refresh_token,
         config.calendar_id or "primary",
         summary,
-        start_iso,
-        end_iso,
+        start_norm,
+        end_norm,
         description,
         location,
         tz,
