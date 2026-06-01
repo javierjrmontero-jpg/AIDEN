@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_CALENDAR_ENABLED: bool = True
     MICROSOFT_CLIENT_ID: str = ""
+    WHISPER_MODEL: str = "base"
     class Config:
         env_file = ".env"
 
