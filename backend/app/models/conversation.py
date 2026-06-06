@@ -13,6 +13,7 @@ class Conversation(Base):
     title = Column(String(200), nullable=False, default="Nueva conversación")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    tool_calls = Column(Text, nullable=True)   
 
 class Message(Base):
     __tablename__ = "messages"

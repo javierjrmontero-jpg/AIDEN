@@ -11,6 +11,17 @@ import { useTTS } from "@/components/useTTS";
 
 const API_URL = "";
 
+// Nombres amigables para el indicador visual de herramienta en ejecución
+const TOOL_LABELS: Record<string, string> = {
+  get_calendar_events:   "Consultando calendario…",
+  create_calendar_event: "Creando evento en calendario…",
+  send_email:            "Preparando email…",
+  create_task:           "Creando tarea…",
+  search_documents:      "Buscando en documentos…",
+  read_memories:         "Consultando memorias…",
+  web_search:            "Buscando en la web…",
+};
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -30,6 +41,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -52,6 +64,8 @@ export default function Home() {
     account_label: string;
   }>(null);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [editedSubject, setEditedSubject] = useState<string>('');
+  const [editedBody, setEditedBody] = useState<string>('');
 
 useEffect(() => {
   const t = localStorage.getItem("mate_token");
@@ -303,13 +317,20 @@ useEffect(() => {
             try {
               const draft = JSON.parse(text.slice("[CONFIRM_EMAIL:".length, -1));
               setPendingEmail(draft);
+              setEditedSubject(draft.subject ?? '');
+              setEditedBody(draft.body ?? '');
             } catch (err) {
               console.error("CONFIRM_EMAIL parse error", err);
             }
             continue;
           }
           if (text === "[STATUS:searching]") { setSearching(true); continue; }
-          if (text === "[STATUS:done]") { setSearching(false); continue; }
+          if (text === "[STATUS:done]") { setSearching(false); setCurrentTool(null); continue; }
+          if (typeof text === "string" && text.startsWith("[STATUS:tool:")) {
+            const toolName = text.replace("[STATUS:tool:", "").replace("]", "").trim();
+            setCurrentTool(toolName);
+            continue;
+          }
           if (typeof text === "string" && text.startsWith("[STATUS:")) { continue; }
 
           setMessages((prev) => {
@@ -341,6 +362,7 @@ if (ttsEnabled) {
     } finally {
       setLoading(false);
       setSearching(false);
+      setCurrentTool(null);
     }
   };
 
@@ -353,8 +375,8 @@ if (ttsEnabled) {
         headers: authHeaders(),
         body: JSON.stringify({
           to: pendingEmail.to,
-          subject: pendingEmail.subject,
-          body: pendingEmail.body,
+          subject: editedSubject,
+          body: editedBody,
           account_id: pendingEmail.account_id,
         }),
       });
@@ -369,6 +391,8 @@ if (ttsEnabled) {
     } finally {
       setSendingEmail(false);
       setPendingEmail(null);
+      setEditedSubject('');
+      setEditedBody('');
     }
   };
 
@@ -619,6 +643,19 @@ if (ttsEnabled) {
               </div>
             </div>
           )}
+
+          {currentTool && !searching && (
+            <div className="flex justify-start">
+              <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-xs font-bold mr-2 mt-1 flex-shrink-0">M</div>
+              <div className="bg-gray-800 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full border-2 border-purple-400 border-t-transparent animate-spin" />
+                <span className="text-xs text-gray-400">
+                  {TOOL_LABELS[currentTool] ?? `Ejecutando ${currentTool}…`}
+                </span>
+              </div>
+            </div>
+          )}
+
           <div ref={bottomRef} />
         </div>
 
@@ -678,23 +715,41 @@ if (ttsEnabled) {
               <span className="text-lg">📧</span>
               <h3 className="text-sm font-semibold text-gray-100">Confirmar envío de email</h3>
             </div>
-            <div className="space-y-2 text-xs">
+            <div className="space-y-3 text-xs">
+              {/* Desde y Para: solo lectura */}
               <div><span className="text-gray-500">Desde:</span> <span className="text-gray-200">{pendingEmail.account_label}</span></div>
               <div><span className="text-gray-500">Para:</span> <span className="text-gray-200">{pendingEmail.to}</span></div>
-              <div><span className="text-gray-500">Asunto:</span> <span className="text-gray-200">{pendingEmail.subject}</span></div>
-              <div className="pt-1">
-                <p className="text-gray-500 mb-1">Mensaje:</p>
-                <div className="max-h-48 overflow-y-auto whitespace-pre-wrap bg-gray-800 border border-gray-700 rounded-lg p-3 text-gray-200">
-                  {pendingEmail.body}
-                </div>
+              {/* Asunto: editable */}
+              <div>
+                <label className="block text-gray-500 mb-1">Asunto</label>
+                <input
+                  type="text"
+                  value={editedSubject}
+                  onChange={(e) => setEditedSubject(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 text-xs outline-none focus:border-emerald-500 transition-colors"
+                />
+              </div>
+              {/* Mensaje: editable */}
+              <div>
+                <label className="block text-gray-500 mb-1">Mensaje</label>
+                <textarea
+                  value={editedBody}
+                  onChange={(e) => setEditedBody(e.target.value)}
+                  rows={7}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 text-xs outline-none focus:border-emerald-500 transition-colors resize-y"
+                />
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setPendingEmail(null)} disabled={sendingEmail}
+              <button
+                onClick={() => { setPendingEmail(null); setEditedSubject(''); setEditedBody(''); }}
+                disabled={sendingEmail}
                 className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-xs text-gray-200 transition-colors disabled:opacity-50">
                 Cancelar
               </button>
-              <button onClick={confirmSendEmail} disabled={sendingEmail}
+              <button
+                onClick={confirmSendEmail}
+                disabled={sendingEmail || !editedSubject.trim() || !editedBody.trim()}
                 className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-medium text-white transition-colors disabled:opacity-50">
                 {sendingEmail ? "Enviando..." : "Enviar"}
               </button>

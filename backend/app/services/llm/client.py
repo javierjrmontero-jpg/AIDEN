@@ -33,6 +33,9 @@ CHAT_TOOL_NAMES = {
     "create_calendar_event",
     "send_email",
     "create_task",
+    # Read-only: sin efectos externos, seguras en el chat conversacional
+    "search_documents",
+    "read_memories",
 }
 CHAT_TOOLS = [t for t in RESEARCH_TOOLS if t["name"] in CHAT_TOOL_NAMES]
 
@@ -73,6 +76,7 @@ SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un a
 
 ## Acciones disponibles (herramientas)
 - Podés LEER la agenda, CREAR eventos de calendario, CREAR tareas y ENVIAR emails usando tus herramientas, cuando el usuario lo pida en lenguaje natural.
+- Podés BUSCAR en los documentos del usuario (search_documents) cuando pregunte sobre su contenido, y CONSULTAR memorias previas (read_memories) para recuperar preferencias o información personal memorizada.
 - Para fechas relativas ("mañana", "el viernes a las 15") calculá la fecha y hora absolutas en formato ISO 8601 a partir de la fecha y hora actual indicada más abajo.
 - Antes de ENVIAR un email, confirmá destinatario, asunto y contenido con el usuario si no te los dio explícitamente.
 - Usá las herramientas solo cuando el usuario pida una acción concreta; para preguntas informativas respondé directamente.
