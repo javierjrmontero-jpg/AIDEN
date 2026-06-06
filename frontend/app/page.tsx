@@ -44,6 +44,14 @@ export default function Home() {
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [voiceLang, setVoiceLang] = useState("es-AR");
   const { speak, stop } = useTTS(voiceLang);
+  const [pendingEmail, setPendingEmail] = useState<null | {
+    to: string;
+    subject: string;
+    body: string;
+    account_id: string | number | null;
+    account_label: string;
+  }>(null);
+  const [sendingEmail, setSendingEmail] = useState(false);
 
 useEffect(() => {
   const t = localStorage.getItem("mate_token");
@@ -291,8 +299,18 @@ useEffect(() => {
             loadConversations();
             continue;
           }
+          if (typeof text === "string" && text.startsWith("[CONFIRM_EMAIL:")) {
+            try {
+              const draft = JSON.parse(text.slice("[CONFIRM_EMAIL:".length, -1));
+              setPendingEmail(draft);
+            } catch (err) {
+              console.error("CONFIRM_EMAIL parse error", err);
+            }
+            continue;
+          }
           if (text === "[STATUS:searching]") { setSearching(true); continue; }
           if (text === "[STATUS:done]") { setSearching(false); continue; }
+          if (typeof text === "string" && text.startsWith("[STATUS:")) { continue; }
 
           setMessages((prev) => {
             const updated = [...prev];
@@ -323,6 +341,34 @@ if (ttsEnabled) {
     } finally {
       setLoading(false);
       setSearching(false);
+    }
+  };
+
+  const confirmSendEmail = async () => {
+    if (!pendingEmail || !token) return;
+    setSendingEmail(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/email/send-confirmed`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          to: pendingEmail.to,
+          subject: pendingEmail.subject,
+          body: pendingEmail.body,
+          account_id: pendingEmail.account_id,
+        }),
+      });
+      const data = await res.json();
+      if (data.sent) {
+        notify(`Email enviado a ${pendingEmail.to}`, "success");
+      } else {
+        notify(`No se pudo enviar el email${data.error ? ": " + data.error : ""}`, "error");
+      }
+    } catch (e) {
+      notify("Error al enviar el email.", "error");
+    } finally {
+      setSendingEmail(false);
+      setPendingEmail(null);
     }
   };
 
@@ -624,6 +670,38 @@ if (ttsEnabled) {
           </p>
         </div>
       </div>
+
+      {pendingEmail && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-lg bg-gray-900 border border-gray-700 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">📧</span>
+              <h3 className="text-sm font-semibold text-gray-100">Confirmar envío de email</h3>
+            </div>
+            <div className="space-y-2 text-xs">
+              <div><span className="text-gray-500">Desde:</span> <span className="text-gray-200">{pendingEmail.account_label}</span></div>
+              <div><span className="text-gray-500">Para:</span> <span className="text-gray-200">{pendingEmail.to}</span></div>
+              <div><span className="text-gray-500">Asunto:</span> <span className="text-gray-200">{pendingEmail.subject}</span></div>
+              <div className="pt-1">
+                <p className="text-gray-500 mb-1">Mensaje:</p>
+                <div className="max-h-48 overflow-y-auto whitespace-pre-wrap bg-gray-800 border border-gray-700 rounded-lg p-3 text-gray-200">
+                  {pendingEmail.body}
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setPendingEmail(null)} disabled={sendingEmail}
+                className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-xs text-gray-200 transition-colors disabled:opacity-50">
+                Cancelar
+              </button>
+              <button onClick={confirmSendEmail} disabled={sendingEmail}
+                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-medium text-white transition-colors disabled:opacity-50">
+                {sendingEmail ? "Enviando..." : "Enviar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notificaciones */}
       {notifications.map(n => (

@@ -1,3 +1,5 @@
+from email.mime import text
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -33,7 +35,7 @@ async def stream_and_save(messages, conversation_id, user, db):
         if chunk.startswith("data: ") and chunk.strip() not in ["data: [DONE]"]:
             try:
                 text = __import__('json').loads(chunk[6:])
-                if isinstance(text, str) and not text.startswith("[STATUS:"):
+                if isinstance(text, str) and not text.startswith("[STATUS:") and not text.startswith("[CONFIRM_EMAIL:"):
                     full_response += text
             except Exception:
                 pass

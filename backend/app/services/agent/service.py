@@ -82,13 +82,14 @@ RESEARCH_TOOLS = [
     },
     {
         "name": "send_email",
-        "description": "Envía un email usando la cuenta configurada del usuario.",
+        "description": "Envía un email usando una cuenta configurada del usuario. Si el usuario tiene varias cuentas, indicá cuál en 'from_account' (ej: 'gmail', 'outlook' o la dirección).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "to":      {"type": "string"},
-                "subject": {"type": "string"},
-                "body":    {"type": "string"}
+                "to":           {"type": "string"},
+                "subject":      {"type": "string"},
+                "body":         {"type": "string"},
+                "from_account": {"type": "string", "description": "Opcional. Cuenta de origen: proveedor o dirección. Si se omite y hay una sola cuenta, se usa esa."}
             },
             "required": ["to", "subject", "body"]
         }
@@ -138,6 +139,43 @@ DOCUMENT_TOOL = [
     }
 ]
 
+_ACCOUNT_ALIASES = {
+    "outlook":   ["outlook", "hotmail", "live", "microsoft", "graph", "oauth"],
+    "hotmail":   ["outlook", "hotmail", "live", "microsoft", "graph", "oauth"],
+    "microsoft": ["outlook", "hotmail", "live", "microsoft", "graph", "oauth"],
+    "gmail":     ["gmail", "google", "basic"],
+    "google":    ["gmail", "google", "basic"],
+}
+
+
+def _account_label(cfg) -> str:
+    """Identificador legible de una cuenta (dirección o proveedor)."""
+    for attr in ("email", "email_address", "username", "google_email", "address"):
+        val = getattr(cfg, attr, None)
+        if val:
+            return str(val)
+    return getattr(cfg, "provider", None) or f"cuenta#{getattr(cfg, 'id', '?')}"
+
+
+def _resolve_email_account(configs, hint):
+    """Elige la cuenta de origen.
+    - sin hint + 1 cuenta  -> esa
+    - sin hint + N cuentas -> None (hay que pedir aclaración)
+    - con hint             -> match por etiqueta/proveedor/auth (con alias); None si no matchea
+    """
+    if not hint:
+        return configs[0] if len(configs) == 1 else None
+    h = hint.strip().lower()
+    terms = _ACCOUNT_ALIASES.get(h, [h])
+    for cfg in configs:
+        haystack = " ".join([
+            _account_label(cfg).lower(),
+            (getattr(cfg, "provider", "") or "").lower(),
+            (getattr(cfg, "auth_type", "") or "").lower(),
+        ])
+        if any(t in haystack for t in terms):
+            return cfg
+    return None
 
 async def _execute_tool(tool_name: str, tool_input: dict, user, db: AsyncSession) -> str:
     try:
@@ -185,15 +223,29 @@ async def _execute_tool(tool_name: str, tool_input: dict, user, db: AsyncSession
             return f"Tarea creada: '{task.title}' (prioridad: {task.priority})"
 
         elif tool_name == "send_email":
-            result = await db.execute(
-                select(EmailConfig).where(EmailConfig.user_id == user.id)
+            r = await db.execute(
+                select(EmailConfig)
+                .where(EmailConfig.user_id == user.id)
+                .where(EmailConfig.enabled == True)
             )
-            config = result.scalar_one_or_none()
-            if not config:
+            configs = r.scalars().all()
+            if not configs:
                 return "Error: no hay cuenta de email configurada."
+ 
+            config = _resolve_email_account(configs, tool_input.get("from_account"))
+            if config is None:
+                etiquetas = ", ".join(_account_label(c) for c in configs)
+                if tool_input.get("from_account"):
+                    return (f"No encontré la cuenta '{tool_input['from_account']}'. "
+                            f"Cuentas disponibles: {etiquetas}.")
+                return (f"Hay varias cuentas configuradas ({etiquetas}). "
+                        f"Indicá desde cuál enviar (from_account).")
+ 
             success = await send_email(config, to=tool_input["to"],
                                        subject=tool_input["subject"], body=tool_input["body"])
-            return f"Email enviado a {tool_input['to']}." if success else "Error al enviar el email."
+            origen = _account_label(config)
+            return (f"Email enviado a {tool_input['to']} desde {origen}."
+                    if success else "Error al enviar el email.")
 
         elif tool_name == "get_calendar_events":
             r = await db.execute(

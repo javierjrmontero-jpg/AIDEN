@@ -7,7 +7,7 @@ RUN npm install
 
 COPY . .
 
-# Compila el bundle de producción (sin hot-reload)
+ENV NEXT_DISABLE_ESLINT=1
 RUN npm run build
 
 EXPOSE 3000

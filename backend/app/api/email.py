@@ -10,6 +10,7 @@ from app.models.email_config import EmailConfig
 from app.services.email.service import fetch_inbox, fetch_unread, send_email, PROVIDER_CONFIG
 from app.services.email import graph
 from datetime import datetime
+
 import uuid
 
 router = APIRouter()
@@ -250,3 +251,40 @@ async def send_email_endpoint(
 
     await send_email(config, request.to, request.subject, request.body)
     return {"status": "sent"}
+
+class ConfirmedEmail(BaseModel):
+    to: str
+    subject: str
+    body: str
+    account_id: str | int | None = None
+ 
+ 
+@router.post("/email/send-confirmed")
+async def send_confirmed(
+    payload: ConfirmedEmail,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    r = await db.execute(
+        select(EmailConfig)
+        .where(EmailConfig.user_id == current_user.id)
+        .where(EmailConfig.enabled == True)
+    )
+    configs = r.scalars().all()
+    if not configs:
+        return {"sent": False, "error": "No hay cuenta de email configurada."}
+ 
+    # Revalida que la cuenta pertenezca al usuario (no se confía en el cliente)
+    config = None
+    if payload.account_id is not None:
+        for c in configs:
+            if str(getattr(c, "id", "")) == str(payload.account_id):
+                config = c
+                break
+    if config is None:
+        config = configs[0]
+ 
+    success = await send_email(
+        config, to=payload.to, subject=payload.subject, body=payload.body
+    )
+    return {"sent": bool(success)}

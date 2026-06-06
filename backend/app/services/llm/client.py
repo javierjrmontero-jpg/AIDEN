@@ -4,6 +4,12 @@ import logging
 from app.core.config import settings
 from app.services.rag.service import search_documents
 from app.services.search.service import web_search, format_results_for_llm
+from app.services.agent.service import (
+    RESEARCH_TOOLS,
+    _execute_tool,
+    _resolve_email_account,
+    _account_label,
+)
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -16,6 +22,23 @@ LANGUAGE_MAP = {
     "de": "alemán",
     "it": "italiano"
 }
+
+# --- Tool-loop en chat -------------------------------------------------------
+# Subconjunto SEGURO de herramientas para el chat conversacional.
+# Reutiliza los schemas y el executor del agente (DRY). Se excluyen
+# execute_python / execute_bash a propósito: la ejecución de código por
+# lenguaje natural debe quedar solo en el agente autónomo, no en el chat.
+CHAT_TOOL_NAMES = {
+    "get_calendar_events",
+    "create_calendar_event",
+    "send_email",
+    "create_task",
+}
+CHAT_TOOLS = [t for t in RESEARCH_TOOLS if t["name"] in CHAT_TOOL_NAMES]
+
+# Tope de iteraciones del bucle de herramientas por turno de chat (anti-loop).
+MAX_TOOL_TURNS = 5
+# -----------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un asistente virtual inteligente by JJRM.
 
@@ -47,6 +70,13 @@ SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un a
 
 ## Resultados de búsqueda web
 {web_context}
+
+## Acciones disponibles (herramientas)
+- Podés LEER la agenda, CREAR eventos de calendario, CREAR tareas y ENVIAR emails usando tus herramientas, cuando el usuario lo pida en lenguaje natural.
+- Para fechas relativas ("mañana", "el viernes a las 15") calculá la fecha y hora absolutas en formato ISO 8601 a partir de la fecha y hora actual indicada más abajo.
+- Antes de ENVIAR un email, confirmá destinatario, asunto y contenido con el usuario si no te los dio explícitamente.
+- Usá las herramientas solo cuando el usuario pida una acción concreta; para preguntas informativas respondé directamente.
+- Después de ejecutar una acción, confirmá el resultado de forma breve y clara.
 
 ## Tu forma de trabajar
 - Respondés SIEMPRE en {user_language} sin excepción, independientemente del idioma en que te escriban
@@ -123,18 +153,23 @@ async def stream_chat(messages: list, user=None, db=None):
                 .where(EmailConfig.user_id == user.id)
                 .where(EmailConfig.enabled == True)
             )
-            email_config = result.scalar_one_or_none()
-            if email_config:
-                unread = await fetch_unread(email_config, limit=5)
-                if unread:
-                    lines = [f"Tenés {len(unread)} email(s) no leído(s):"]
-                    for e in unread:
-                        lines.append(f"- De: {e['from'].split('<')[0].strip()} | Asunto: {e['subject']}")
-                    emails_text = "\n".join(lines)
+            email_configs = result.scalars().all()
+            all_unread = []
+            for cfg in email_configs:
+                try:
+                    unread = await fetch_unread(cfg, limit=5)
+                    all_unread.extend(unread)
+                except Exception as ie:
+                    logger.error(f"Error leyendo cuenta {cfg.id}: {ie}")
+            if all_unread:
+                lines = [f"Tenés {len(all_unread)} email(s) no leído(s):"]
+                for e in all_unread:
+                    lines.append(f"- De: {e['from'].split('<')[0].strip()} | Asunto: {e['subject']}")
+                emails_text = "\n".join(lines)
         except Exception as e:
             logger.error(f"Error cargando emails: {e}")
 
-# Próximos eventos de calendario
+    # Próximos eventos de calendario
     calendar_text = "No hay calendario conectado."
     if user and db:
         try:
@@ -195,16 +230,105 @@ async def stream_chat(messages: list, user=None, db=None):
         web_context=web_context,
         calendar_context=calendar_text,
         fecha=datetime.now().strftime("%d/%m/%Y %H:%M"),
-        
     )
 
-    with client.messages.stream(
-        model="claude-sonnet-4-5",
-        max_tokens=2048,
-        system=system,
-        messages=[{"role": m.role, "content": m.content} for m in messages]
-    ) as stream:
-        for text in stream.text_stream:
-            payload = json.dumps(text, ensure_ascii=False)
-            yield f"data: {payload}\n\n"
+    # --- Tool-loop: streaming + ejecución de herramientas hasta end_turn -----
+    # Conversación mutable: arranca con los mensajes del usuario y va sumando
+    # los turnos del asistente (texto + tool_use) y los tool_result.
+    convo = [{"role": m.role, "content": m.content} for m in messages]
+
+    for _turn in range(MAX_TOOL_TURNS):
+        with client.messages.stream(
+            model="claude-sonnet-4-5",
+            max_tokens=2048,
+            system=system,
+            tools=CHAT_TOOLS,
+            messages=convo,
+        ) as stream:
+            # Streamea al cliente cualquier texto que el modelo emita en esta pasada
+            for text in stream.text_stream:
+                payload = json.dumps(text, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
+            final = stream.get_final_message()
+
+        # Guarda el turno completo del asistente (texto + bloques tool_use)
+        convo.append({"role": "assistant", "content": final.content})
+
+        # Si no pidió herramientas, terminó: salimos del bucle
+        if final.stop_reason != "tool_use":
+            break
+
+        # Ejecuta cada herramienta solicitada y reinyecta los resultados
+        tool_results = []
+        for block in final.content:
+            if block.type != "tool_use":
+                continue
+ 
+            tool_input = block.input if isinstance(block.input, dict) else vars(block.input)
+             # --- GATE: send_email NO se ejecuta; se manda a confirmar -------
+            if block.name == "send_email":
+                from sqlalchemy import select
+                from app.models.email_config import EmailConfig
+ 
+                r = await db.execute(
+                    select(EmailConfig)
+                    .where(EmailConfig.user_id == user.id)
+                    .where(EmailConfig.enabled == True)
+                )
+                configs = r.scalars().all()
+ 
+                if not configs:
+                    result = "Error: no hay cuenta de email configurada."
+                else:
+                    cfg = _resolve_email_account(configs, tool_input.get("from_account"))
+                    if cfg is None:
+                        etiquetas = ", ".join(_account_label(c) for c in configs)
+                        if tool_input.get("from_account"):
+                            result = (f"No encontré la cuenta '{tool_input['from_account']}'. "
+                                      f"Cuentas disponibles: {etiquetas}.")
+                        else:
+                            result = (f"Hay varias cuentas ({etiquetas}). "
+                                      f"Indicá desde cuál enviar (from_account).")
+                    else:
+                        draft = {
+                            "to": tool_input.get("to", ""),
+                            "subject": tool_input.get("subject", ""),
+                            "body": tool_input.get("body", ""),
+                            "account_id": getattr(cfg, "id", None),
+                            "account_label": _account_label(cfg),
+                        }
+                        marker = f"[CONFIRM_EMAIL:{json.dumps(draft, ensure_ascii=False)}]"
+                        yield f"data: {json.dumps(marker, ensure_ascii=False)}\n\n"
+                        result = ("Borrador de email preparado y mostrado al usuario. "
+                                  "ESPERANDO su confirmación explícita. El email NO fue enviado.")
+ 
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                })
+                continue
+            # ----------------------------------------------------------------
+ 
+            yield f"data: {json.dumps(f'[STATUS:tool:{block.name}]', ensure_ascii=False)}\n\n"
+            try:
+                result = await _execute_tool(block.name, tool_input, user, db)
+            except Exception as e:
+                logger.error(f"Error ejecutando tool {block.name} en chat: {e}")
+                result = f"Error ejecutando '{block.name}': {e}"
+ 
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": result,
+            })
+            yield f"data: {json.dumps('[STATUS:done]')}\n\n"
+ 
+        convo.append({"role": "user", "content": tool_results})
+    else:
+        # Se agotó MAX_TOOL_TURNS sin un end_turn limpio
+        logger.warning("Tool-loop alcanzó MAX_TOOL_TURNS sin end_turn")
+        aviso = "\n\n_(Se alcanzó el límite de pasos de herramientas en este turno.)_"
+        yield f"data: {json.dumps(aviso, ensure_ascii=False)}\n\n"
+
     yield "data: [DONE]\n\n"
