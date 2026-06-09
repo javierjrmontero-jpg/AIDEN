@@ -338,6 +338,47 @@ async def run_agent(task: str, user=None, db=None):
 
                 yield f"data: {json.dumps({'type': 'step', 'tool': block.name, 'input': str(tool_input)[:200]})}\n\n"
 
+                # --- GATE: send_email → prepara borrador; NO envía directamente ---
+                # El agente autónomo no envía emails sin confirmación explícita del
+                # usuario. Se emite un evento SSE 'email_draft' con el borrador y la
+                # cuenta resuelta; el frontend muestra una tarjeta de confirmación.
+                # El email real se despacha solo si el usuario presiona "Confirmar".
+                if block.name == "send_email":
+                    r2 = await db.execute(
+                        select(EmailConfig)
+                        .where(EmailConfig.user_id == user.id)
+                        .where(EmailConfig.enabled == True)
+                    )
+                    configs = r2.scalars().all()
+                    if not configs:
+                        result = "Error: no hay cuenta de email configurada."
+                    else:
+                        cfg = _resolve_email_account(configs, tool_input.get("from_account"))
+                        if cfg is None:
+                            etiquetas = ", ".join(_account_label(c) for c in configs)
+                            if tool_input.get("from_account"):
+                                result = (f"No encontré la cuenta '{tool_input['from_account']}'. "
+                                          f"Cuentas disponibles: {etiquetas}.")
+                            else:
+                                result = (f"Hay varias cuentas ({etiquetas}). "
+                                          f"Indicá desde cuál enviar (from_account).")
+                        else:
+                            draft = {
+                                "to": tool_input.get("to", ""),
+                                "subject": tool_input.get("subject", ""),
+                                "body": tool_input.get("body", ""),
+                                "account_id": getattr(cfg, "id", None),
+                                "account_label": _account_label(cfg),
+                            }
+                            yield f"data: {json.dumps({'type': 'email_draft', **draft})}\n\n"
+                            result = ("Borrador de email preparado y enviado al usuario para "
+                                      "confirmación. El email NO fue enviado todavía.")
+                    collected_info.append(f"## {block.name}\n{result}")
+                    yield f"data: {json.dumps({'type': 'result', 'tool': block.name, 'result': str(result)[:300]})}\n\n"
+                    tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result})
+                    continue
+                # -----------------------------------------------------------------
+
                 result = await _execute_tool(block.name, tool_input, user, db)
                 collected_info.append(f"## {block.name}\n{result}")
 

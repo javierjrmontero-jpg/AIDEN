@@ -1,5 +1,4 @@
 "use client";
-
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
@@ -15,6 +14,14 @@ interface AgentStep {
   format?: string;
 }
 
+interface EmailDraft {
+  to: string;
+  subject: string;
+  body: string;
+  account_id: string | null;
+  account_label: string;
+}
+
 export default function Agent() {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -23,6 +30,9 @@ export default function Agent() {
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [finalResult, setFinalResult] = useState("");
   const [document, setDocument] = useState<{title: string; content: string; format: string} | null>(null);
+  const [emailDraft, setEmailDraft] = useState<EmailDraft | null>(null);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,13 +45,42 @@ export default function Agent() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [steps]);
 
+  const sendDraft = async () => {
+    if (!emailDraft || !token) return;
+    setEmailSending(true);
+    try {
+      const res = await fetch("/api/v1/email/send-confirmed", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          account_id: emailDraft.account_id,
+          to: emailDraft.to,
+          subject: emailDraft.subject,
+          body: emailDraft.body,
+        })
+      });
+      if (res.ok) {
+        setEmailSent(true);
+        setEmailDraft(null);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
   const runAgent = async () => {
     if (!task.trim() || !token || running) return;
     setRunning(true);
     setSteps([]);
     setFinalResult("");
     setDocument(null);
-
+    setEmailDraft(null);
+    setEmailSent(false);
     try {
       const response = await fetch("/api/v1/agent/run", {
         method: "POST",
@@ -51,28 +90,31 @@ export default function Agent() {
         },
         body: JSON.stringify({ task })
       });
-
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-
       while (reader) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
             const data = JSON.parse(line.slice(6));
-
             if (data.type === "document") {
               setDocument({ title: data.title, content: data.content, format: data.format || "md" });
             } else if (data.type === "complete") {
               setFinalResult(data.message);
+            } else if (data.type === "email_draft") {
+              setEmailDraft({
+                to: data.to,
+                subject: data.subject,
+                body: data.body,
+                account_id: data.account_id,
+                account_label: data.account_label,
+              });
             } else {
               setSteps(prev => [...prev, data]);
             }
@@ -125,7 +167,6 @@ export default function Agent() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 px-4 py-8">
       <div className="max-w-3xl mx-auto">
-
         <div className="flex items-center gap-3 mb-8">
           <button onClick={() => router.push("/")}
             className="p-2 rounded-lg hover:bg-gray-800 text-gray-500 hover:text-gray-300 transition-colors">
@@ -174,7 +215,6 @@ export default function Agent() {
               </>
             )}
           </button>
-
           {/* Sugerencias */}
           {steps.length === 0 && !running && (
             <div className="grid grid-cols-2 gap-2 mt-3">
@@ -222,6 +262,58 @@ export default function Agent() {
               ))}
               <div ref={bottomRef} />
             </div>
+          </div>
+        )}
+
+        {/* Borrador de email — confirmación del usuario */}
+        {emailDraft && !emailSent && (
+          <div className="bg-gray-900 rounded-2xl border border-blue-800 p-5 mb-4">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-lg">✉️</span>
+              <h3 className="text-sm font-semibold text-blue-400">Borrador de email — pendiente de confirmación</h3>
+            </div>
+            <div className="space-y-2 text-sm mb-4 bg-gray-800 rounded-xl p-4">
+              <div className="flex gap-3">
+                <span className="text-gray-500 w-16 flex-shrink-0 text-xs uppercase tracking-wide pt-0.5">Desde</span>
+                <span className="text-gray-300">{emailDraft.account_label}</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-gray-500 w-16 flex-shrink-0 text-xs uppercase tracking-wide pt-0.5">Para</span>
+                <span className="text-gray-300">{emailDraft.to}</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-gray-500 w-16 flex-shrink-0 text-xs uppercase tracking-wide pt-0.5">Asunto</span>
+                <span className="text-gray-200 font-medium">{emailDraft.subject}</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-gray-500 w-16 flex-shrink-0 text-xs uppercase tracking-wide pt-0.5">Cuerpo</span>
+                <span className="text-gray-400 whitespace-pre-wrap text-xs leading-relaxed">{emailDraft.body}</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={sendDraft}
+                disabled={emailSending}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-xl text-sm font-medium transition-colors"
+              >
+                {emailSending ? "Enviando..." : "✓ Confirmar envío"}
+              </button>
+              <button
+                onClick={() => setEmailDraft(null)}
+                disabled={emailSending}
+                className="px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-xl text-sm transition-colors"
+              >
+                Descartar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Confirmación de email enviado */}
+        {emailSent && (
+          <div className="bg-gray-900 rounded-2xl border border-emerald-800 p-4 mb-4 flex items-center gap-2">
+            <span className="text-emerald-400">✅</span>
+            <span className="text-sm text-emerald-400">Email enviado correctamente.</span>
           </div>
         )}
 
