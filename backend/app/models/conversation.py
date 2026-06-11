@@ -24,3 +24,4 @@ class Message(Base):
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     order_index = Column(Integer, default=0)
+    tool_calls = Column(Text, nullable=True)  # JSON array de tools ejecutadas en este mensaje

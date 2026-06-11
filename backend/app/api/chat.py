@@ -27,7 +27,7 @@ class ChatRequest(BaseModel):
 
 async def stream_and_save(messages, conversation_id, user, db):
     full_response = ""
-    executed_tools: list[str] = []   # tools ejecutadas en este turno
+    executed_tools = []   # tools ejecutadas en este turno
     order = len(messages)
 
     user_msg = messages[-1]
@@ -49,20 +49,17 @@ async def stream_and_save(messages, conversation_id, user, db):
         yield chunk
 
     if full_response:
-        await save_message(db, conversation_id, "assistant", full_response, order)
+        saved_msg = await save_message(db, conversation_id, "assistant", full_response, order)
+        if executed_tools and saved_msg:
+            try:
+                await db.execute(
+                    sql_text("UPDATE messages SET tool_calls = :tc WHERE id = :mid"),
+                    {"tc": _json.dumps(executed_tools, ensure_ascii=False), "mid": saved_msg.id}
+                )
+                await db.commit()
+            except Exception:
+                pass
 
-    # Persistir tools ejecutadas en la conversación
-    if executed_tools:
-        try:
-            await db.execute(
-                sql_text("UPDATE conversations SET tool_calls = :tc WHERE id = :cid"),
-                {"tc": _json.dumps(executed_tools, ensure_ascii=False), "cid": conversation_id}
-            )
-            await db.commit()
-        except Exception:
-            pass
-
-    # Extraer memorias en background si la conversación tiene suficiente contenido
     if len(messages) >= 3:
         try:
             result = await db.execute(
@@ -76,7 +73,7 @@ async def stream_and_save(messages, conversation_id, user, db):
         except Exception as e:
             pass
 
-    yield f"data: {_json.dumps('[CONV:' + conversation_id + ']')}\n\n"
+    yield "data: " + _json.dumps("[CONV:" + conversation_id + "]") + "\n\n"
 
 @router.post("/chat")
 async def chat(

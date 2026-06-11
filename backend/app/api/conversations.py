@@ -10,6 +10,7 @@ from app.services.conversation.service import (
 )
 from app.models.conversation import Conversation, Message
 from datetime import datetime
+import json as _json
 
 router = APIRouter()
 
@@ -100,7 +101,8 @@ async def get_conversation_messages(
             "id": m.id,
             "role": m.role,
             "content": m.content,
-            "created_at": m.created_at.isoformat()
+            "created_at": m.created_at.isoformat(),
+            "tool_calls": _json.loads(m.tool_calls) if getattr(m, "tool_calls", None) else None
         }
         for m in msgs
     ]
@@ -128,7 +130,7 @@ async def export_conversation(
     )
     conv = conv_result.scalar_one_or_none()
     if not conv:
-        raise HTTPException(404, "Conversación no encontrada")
+        raise HTTPException(404, "Conversacion no encontrada")
 
     msgs_result = await db.execute(
         select(Message)
@@ -145,7 +147,12 @@ async def export_conversation(
         content += f"*Exportado el {datetime.now().strftime('%d/%m/%Y %H:%M')} — MATE by JJRM*\n\n---\n\n"
         for msg in messages:
             prefix = "**Vos:**" if msg.role == "user" else "**MATE:**"
-            content += f"{prefix}\n\n{msg.content}\n\n---\n\n"
+            tools = getattr(msg, "tool_calls", None)
+            tool_line = ""
+            if tools:
+                parsed = _json.loads(tools)
+                tool_line = f"\n*[tools: {', '.join(parsed)}]*\n"
+            content += f"{prefix}{tool_line}\n\n{msg.content}\n\n---\n\n"
         return Response(
             content=content.encode("utf-8"),
             media_type="text/markdown",
@@ -156,7 +163,12 @@ async def export_conversation(
         content = f"{conv.title}\n{'='*50}\n\n"
         for msg in messages:
             prefix = "VOS:" if msg.role == "user" else "MATE:"
-            content += f"{prefix}\n{msg.content}\n\n{'-'*30}\n\n"
+            tools = getattr(msg, "tool_calls", None)
+            tool_line = ""
+            if tools:
+                parsed = _json.loads(tools)
+                tool_line = f" [tools: {', '.join(parsed)}]"
+            content += f"{prefix}{tool_line}\n{msg.content}\n\n{'-'*30}\n\n"
         return Response(
             content=content.encode("utf-8"),
             media_type="text/plain",
@@ -164,7 +176,6 @@ async def export_conversation(
         )
 
     elif format == "json":
-        import json
         data = {
             "title": conv.title,
             "exported_at": datetime.now().isoformat(),
@@ -173,16 +184,17 @@ async def export_conversation(
                 {
                     "role": m.role,
                     "content": m.content,
-                    "order": m.order_index
+                    "order": m.order_index,
+                    "tool_calls": _json.loads(m.tool_calls) if getattr(m, "tool_calls", None) else None
                 }
                 for m in messages
             ]
         }
         return Response(
-            content=json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"),
+            content=_json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"),
             media_type="application/json",
             headers={"Content-Disposition": f"attachment; filename={filename}.json"}
         )
 
     else:
-        raise HTTPException(400, "Formato no soportado. Usá: md, txt, json")
+        raise HTTPException(400, "Formato no soportado. Usa: md, txt, json")
