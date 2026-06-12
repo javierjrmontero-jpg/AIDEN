@@ -162,6 +162,46 @@ async def list_upcoming_events(config, max_results: int = 10, days_ahead: int = 
     )
 
 
+def _list_range_sync(refresh_token: str, calendar_id: str, time_min: str, time_max: str, max_results: int):
+    service = _build_service(refresh_token)
+    result = (
+        service.events()
+        .list(
+            calendarId=calendar_id,
+            timeMin=time_min,
+            timeMax=time_max,
+            maxResults=max_results,
+            singleEvents=True,
+            orderBy="startTime",
+        )
+        .execute()
+    )
+    events = []
+    for ev in result.get("items", []):
+        start = ev.get("start", {})
+        end = ev.get("end", {})
+        events.append({
+            "id": ev.get("id"),
+            "summary": ev.get("summary", "(sin título)"),
+            "start": start.get("dateTime") or start.get("date"),
+            "end": end.get("dateTime") or end.get("date"),
+            "all_day": "date" in start,
+        })
+    return events
+
+
+async def list_events_range(config, time_min: str, time_max: str, max_results: int = 50):
+    """Eventos entre dos timestamps ISO 8601 (pasado o futuro)."""
+    return await asyncio.to_thread(
+        _list_range_sync,
+        config.refresh_token,
+        config.calendar_id or "primary",
+        time_min,
+        time_max,
+        max_results,
+    )
+
+
 async def create_event(
     config,
     summary: str,
