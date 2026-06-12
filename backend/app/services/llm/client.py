@@ -10,6 +10,7 @@ from app.services.agent.service import (
     _resolve_email_account,
     _account_label,
 )
+from app.services.audit.service import write_audit
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -24,22 +25,13 @@ LANGUAGE_MAP = {
 }
 
 # --- Tool-loop en chat -------------------------------------------------------
-# Subconjunto SEGURO de herramientas para el chat conversacional.
-# Reutiliza los schemas y el executor del agente (DRY). Se excluyen
-# execute_python / execute_bash a propósito: la ejecución de código por
-# lenguaje natural debe quedar solo en el agente autónomo, no en el chat.
 CHAT_TOOL_NAMES = {
     "get_calendar_events",
     "create_calendar_event",
     "send_email",
     "create_task",
-    # Read-only: sin efectos externos, seguras en el chat conversacional
-    "search_documents",
-    "read_memories",
 }
 CHAT_TOOLS = [t for t in RESEARCH_TOOLS if t["name"] in CHAT_TOOL_NAMES]
-
-# Tope de iteraciones del bucle de herramientas por turno de chat (anti-loop).
 MAX_TOOL_TURNS = 5
 # -----------------------------------------------------------------------------
 
@@ -76,7 +68,6 @@ SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un a
 
 ## Acciones disponibles (herramientas)
 - Podés LEER la agenda, CREAR eventos de calendario, CREAR tareas y ENVIAR emails usando tus herramientas, cuando el usuario lo pida en lenguaje natural.
-- Podés BUSCAR en los documentos del usuario (search_documents) cuando pregunte sobre su contenido, y CONSULTAR memorias previas (read_memories) para recuperar preferencias o información personal memorizada.
 - Para fechas relativas ("mañana", "el viernes a las 15") calculá la fecha y hora absolutas en formato ISO 8601 a partir de la fecha y hora actual indicada más abajo.
 - Antes de ENVIAR un email, confirmá destinatario, asunto y contenido con el usuario si no te los dio explícitamente.
 - Usá las herramientas solo cuando el usuario pida una acción concreta; para preguntas informativas respondé directamente.
@@ -112,7 +103,6 @@ client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 async def stream_chat(messages: list, user=None, db=None):
     query = messages[-1].content
 
-    # Memorias del usuario
     memories_text = "No hay memorias previas."
     if user and db:
         try:
@@ -121,7 +111,6 @@ async def stream_chat(messages: list, user=None, db=None):
         except Exception as e:
             logger.error(f"Error cargando memorias: {e}")
 
-    # Tareas pendientes
     tasks_text = "No hay tareas pendientes."
     if user and db:
         try:
@@ -145,7 +134,6 @@ async def stream_chat(messages: list, user=None, db=None):
         except Exception as e:
             logger.error(f"Error cargando tareas: {e}")
 
-    # Emails no leídos
     emails_text = "No hay emails no leídos o email no configurado."
     if user and db:
         try:
@@ -173,7 +161,6 @@ async def stream_chat(messages: list, user=None, db=None):
         except Exception as e:
             logger.error(f"Error cargando emails: {e}")
 
-    # Próximos eventos de calendario
     calendar_text = "No hay calendario conectado."
     if user and db:
         try:
@@ -192,7 +179,6 @@ async def stream_chat(messages: list, user=None, db=None):
         except Exception as e:
             logger.error(f"Error cargando calendario: {e}")
 
-    # RAG sobre documentos
     rag_context = "No hay documentos cargados."
     try:
         if user:
@@ -205,7 +191,6 @@ async def stream_chat(messages: list, user=None, db=None):
     except Exception as e:
         logger.error(f"Error en RAG: {e}")
 
-    # Búsqueda web
     web_context = "No se realizó búsqueda web."
     if should_search_web(query):
         yield f"data: {json.dumps('[STATUS:searching]')}\n\n"
@@ -236,9 +221,6 @@ async def stream_chat(messages: list, user=None, db=None):
         fecha=datetime.now().strftime("%d/%m/%Y %H:%M"),
     )
 
-    # --- Tool-loop: streaming + ejecución de herramientas hasta end_turn -----
-    # Conversación mutable: arranca con los mensajes del usuario y va sumando
-    # los turnos del asistente (texto + tool_use) y los tool_result.
     convo = [{"role": m.role, "content": m.content} for m in messages]
 
     for _turn in range(MAX_TOOL_TURNS):
@@ -249,38 +231,35 @@ async def stream_chat(messages: list, user=None, db=None):
             tools=CHAT_TOOLS,
             messages=convo,
         ) as stream:
-            # Streamea al cliente cualquier texto que el modelo emita en esta pasada
             for text in stream.text_stream:
                 payload = json.dumps(text, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
             final = stream.get_final_message()
 
-        # Guarda el turno completo del asistente (texto + bloques tool_use)
         convo.append({"role": "assistant", "content": final.content})
 
-        # Si no pidió herramientas, terminó: salimos del bucle
         if final.stop_reason != "tool_use":
             break
 
-        # Ejecuta cada herramienta solicitada y reinyecta los resultados
         tool_results = []
         for block in final.content:
             if block.type != "tool_use":
                 continue
- 
+
             tool_input = block.input if isinstance(block.input, dict) else vars(block.input)
-             # --- GATE: send_email NO se ejecuta; se manda a confirmar -------
+
+            # --- GATE: send_email → borrador para confirmar ------------------
             if block.name == "send_email":
                 from sqlalchemy import select
                 from app.models.email_config import EmailConfig
- 
+
                 r = await db.execute(
                     select(EmailConfig)
                     .where(EmailConfig.user_id == user.id)
                     .where(EmailConfig.enabled == True)
                 )
                 configs = r.scalars().all()
- 
+
                 if not configs:
                     result = "Error: no hay cuenta de email configurada."
                 else:
@@ -305,32 +284,40 @@ async def stream_chat(messages: list, user=None, db=None):
                         yield f"data: {json.dumps(marker, ensure_ascii=False)}\n\n"
                         result = ("Borrador de email preparado y mostrado al usuario. "
                                   "ESPERANDO su confirmación explícita. El email NO fue enviado.")
- 
+
+                # Audit: borrador de email en chat
+                await write_audit(db, user.id, "chat", "send_email",
+                                   tool_input, result,
+                                   "success" if "borrador" in result else "error")
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
                     "content": result,
                 })
                 continue
-            # ----------------------------------------------------------------
- 
+            # -----------------------------------------------------------------
+
             yield f"data: {json.dumps(f'[STATUS:tool:{block.name}]', ensure_ascii=False)}\n\n"
             try:
                 result = await _execute_tool(block.name, tool_input, user, db)
             except Exception as e:
                 logger.error(f"Error ejecutando tool {block.name} en chat: {e}")
                 result = f"Error ejecutando '{block.name}': {e}"
- 
+
+            # Audit: tool ejecutada en chat
+            await write_audit(db, user.id, "chat", block.name,
+                               tool_input, result,
+                               "error" if result.startswith("Error") else "success")
+
             tool_results.append({
                 "type": "tool_result",
                 "tool_use_id": block.id,
                 "content": result,
             })
             yield f"data: {json.dumps('[STATUS:done]')}\n\n"
- 
+
         convo.append({"role": "user", "content": tool_results})
     else:
-        # Se agotó MAX_TOOL_TURNS sin un end_turn limpio
         logger.warning("Tool-loop alcanzó MAX_TOOL_TURNS sin end_turn")
         aviso = "\n\n_(Se alcanzó el límite de pasos de herramientas en este turno.)_"
         yield f"data: {json.dumps(aviso, ensure_ascii=False)}\n\n"

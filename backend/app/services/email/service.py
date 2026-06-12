@@ -151,6 +151,55 @@ async def fetch_unread(config, limit: int = 10) -> list:
         raise Exception(f"Error al obtener emails no leídos: {str(e)}")
 
 
+async def fetch_sent(config, limit: int = 20) -> list:
+    """Últimos N emails enviados."""
+    # --- Outlook / Graph ---
+    if _is_oauth(config):
+        token = await graph.get_access_token(config.oauth_refresh_token)
+        return await graph.fetch_sent_graph(token, limit)
+
+    # --- IMAP ---
+    try:
+        imap = connect_imap(config)
+        # Distintos proveedores usan distintos nombres para Enviados
+        sent_folders = ["Sent", "Sent Items", "[Gmail]/Sent Mail", "INBOX.Sent"]
+        selected = False
+        for folder in sent_folders:
+            try:
+                status, _ = imap.select(folder)
+                if status == "OK":
+                    selected = True
+                    break
+            except Exception:
+                continue
+
+        if not selected:
+            imap.logout()
+            return []
+
+        _, messages = imap.search(None, "ALL")
+        email_ids = messages[0].split()[-limit:]
+
+        emails = []
+        for eid in reversed(email_ids):
+            _, msg_data = imap.fetch(eid, "(RFC822)")
+            msg = email.message_from_bytes(msg_data[0][1])
+            emails.append({
+                "id": eid.decode(),
+                "subject": decode_str(msg.get("Subject", "")),
+                "to": decode_str(msg.get("To", "")),
+                "date": msg.get("Date", ""),
+                "message_id": msg.get("Message-ID", ""),
+            })
+
+        imap.logout()
+        return emails
+
+    except Exception as e:
+        logger.error(f"Error fetching sent: {e}")
+        return []
+
+
 async def send_email(config, to: str, subject: str, body: str) -> bool:
     # --- Outlook / Graph ---
     if _is_oauth(config):

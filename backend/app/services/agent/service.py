@@ -16,6 +16,7 @@ from app.models.task import Task
 from app.models.email_config import EmailConfig
 from app.services.calendar.service import list_upcoming_events, create_event, format_events_for_prompt
 from app.models.calendar_config import CalendarConfig
+from app.services.audit.service import write_audit
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -149,7 +150,6 @@ _ACCOUNT_ALIASES = {
 
 
 def _account_label(cfg) -> str:
-    """Identificador legible de una cuenta (dirección o proveedor)."""
     for attr in ("email", "email_address", "username", "google_email", "address"):
         val = getattr(cfg, attr, None)
         if val:
@@ -158,11 +158,6 @@ def _account_label(cfg) -> str:
 
 
 def _resolve_email_account(configs, hint):
-    """Elige la cuenta de origen.
-    - sin hint + 1 cuenta  -> esa
-    - sin hint + N cuentas -> None (hay que pedir aclaración)
-    - con hint             -> match por etiqueta/proveedor/auth (con alias); None si no matchea
-    """
     if not hint:
         return configs[0] if len(configs) == 1 else None
     h = hint.strip().lower()
@@ -176,6 +171,7 @@ def _resolve_email_account(configs, hint):
         if any(t in haystack for t in terms):
             return cfg
     return None
+
 
 async def _execute_tool(tool_name: str, tool_input: dict, user, db: AsyncSession) -> str:
     try:
@@ -231,7 +227,6 @@ async def _execute_tool(tool_name: str, tool_input: dict, user, db: AsyncSession
             configs = r.scalars().all()
             if not configs:
                 return "Error: no hay cuenta de email configurada."
- 
             config = _resolve_email_account(configs, tool_input.get("from_account"))
             if config is None:
                 etiquetas = ", ".join(_account_label(c) for c in configs)
@@ -240,7 +235,6 @@ async def _execute_tool(tool_name: str, tool_input: dict, user, db: AsyncSession
                             f"Cuentas disponibles: {etiquetas}.")
                 return (f"Hay varias cuentas configuradas ({etiquetas}). "
                         f"Indicá desde cuál enviar (from_account).")
- 
             success = await send_email(config, to=tool_input["to"],
                                        subject=tool_input["subject"], body=tool_input["body"])
             origen = _account_label(config)
@@ -335,14 +329,9 @@ async def run_agent(task: str, user=None, db=None):
                     continue
 
                 tool_input = block.input if isinstance(block.input, dict) else vars(block.input)
-
                 yield f"data: {json.dumps({'type': 'step', 'tool': block.name, 'input': str(tool_input)[:200]})}\n\n"
 
-                # --- GATE: send_email → prepara borrador; NO envía directamente ---
-                # El agente autónomo no envía emails sin confirmación explícita del
-                # usuario. Se emite un evento SSE 'email_draft' con el borrador y la
-                # cuenta resuelta; el frontend muestra una tarjeta de confirmación.
-                # El email real se despacha solo si el usuario presiona "Confirmar".
+                # --- GATE: send_email → borrador para confirmar, no ejecuta directamente ---
                 if block.name == "send_email":
                     r2 = await db.execute(
                         select(EmailConfig)
@@ -373,15 +362,22 @@ async def run_agent(task: str, user=None, db=None):
                             yield f"data: {json.dumps({'type': 'email_draft', **draft})}\n\n"
                             result = ("Borrador de email preparado y enviado al usuario para "
                                       "confirmación. El email NO fue enviado todavía.")
+                    # Audit: acción de borrador de email
+                    await write_audit(db, user.id, "agent", "send_email",
+                                      tool_input, result,
+                                      "success" if "borrador" in result else "error")
                     collected_info.append(f"## {block.name}\n{result}")
                     yield f"data: {json.dumps({'type': 'result', 'tool': block.name, 'result': str(result)[:300]})}\n\n"
                     tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result})
                     continue
-                # -----------------------------------------------------------------
+                # ---------------------------------------------------------------------------
 
                 result = await _execute_tool(block.name, tool_input, user, db)
+                # Audit: todas las demás tools
+                await write_audit(db, user.id, "agent", block.name,
+                                  tool_input, result,
+                                  "error" if result.startswith("Error") else "success")
                 collected_info.append(f"## {block.name}\n{result}")
-
                 yield f"data: {json.dumps({'type': 'result', 'tool': block.name, 'result': str(result)[:300]})}\n\n"
                 tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result})
 

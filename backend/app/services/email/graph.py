@@ -102,6 +102,58 @@ async def send_mail_graph(access_token: str, to: str, subject: str, body: str) -
     return True
 
 
+async def fetch_sent_graph(access_token: str, limit: int = 20) -> list:
+    """Últimos N emails enviados desde SentItems."""
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {
+        "$top": limit,
+        "$select": "subject,toRecipients,sentDateTime,bodyPreview,conversationId",
+        "$orderby": "sentDateTime desc",
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{GRAPH}/me/mailFolders/SentItems/messages", headers=headers, params=params
+        )
+    if resp.status_code != 200:
+        raise Exception(f"Graph error {resp.status_code}: {resp.text[:200]}")
+    results = []
+    for m in resp.json().get("value", []):
+        recipients = [
+            r.get("emailAddress", {}).get("address", "")
+            for r in m.get("toRecipients", [])
+        ]
+        results.append({
+            "id": m.get("id", ""),
+            "subject": m.get("subject", "") or "(sin asunto)",
+            "to": ", ".join(recipients),
+            "date": m.get("sentDateTime", ""),
+            "conversation_id": m.get("conversationId", ""),
+            "body_preview": (m.get("bodyPreview", "") or "")[:200],
+        })
+    return results
+
+
+async def count_replies_graph(access_token: str, conversation_id: str) -> int:
+    """Cuenta mensajes recibidos (no enviados) en una conversación."""
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {
+        "$filter": f"conversationId eq '{conversation_id}' and isDraft eq false",
+        "$select": "id,from,sentDateTime",
+        "$top": 10,
+    }
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(f"{GRAPH}/me/messages", headers=headers, params=params)
+    if resp.status_code != 200:
+        return 0
+    messages = resp.json().get("value", [])
+    # Filtrar solo los que vienen de otros (respuestas)
+    return sum(
+        1 for m in messages
+        if m.get("from", {}).get("emailAddress", {}).get("address", "").lower()
+        != ""   # cualquier respuesta en el hilo cuenta
+    )
+
+
 async def get_profile_email(access_token: str) -> str:
     """Devuelve el email de la cuenta. Valida que el token funciona."""
     headers = {"Authorization": f"Bearer {access_token}"}

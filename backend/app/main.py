@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import chat, conversations, auth, documents, generate, memories, sandbox, admin, tasks, email, stats, agent, calendar, voice, audit, briefing, briefing_weekly, tasks_prioritize
+from app.api import chat, conversations, auth, documents, generate, memories, sandbox, admin, tasks, email, stats, agent, calendar, voice, audit, briefing, briefing_weekly, tasks_prioritize, email_followup, autonomous_rules, context_extract
 from app.core.config import settings
 from app.core.database import init_db
 
@@ -17,7 +17,9 @@ app.add_middleware(
         "https://mate.local",
         "http://mate.local",
         "http://mate.local:3000",
-        "http://localhost:3000"
+        "http://localhost:3000",
+        "https://molmont.duckdns.org:8443",
+        "https://molmont.duckdns.org"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -46,6 +48,9 @@ app.include_router(audit.router, prefix="/api/v1")
 app.include_router(briefing.router, prefix="/api/v1")
 app.include_router(briefing_weekly.router, prefix="/api/v1")
 app.include_router(tasks_prioritize.router, prefix="/api/v1")
+app.include_router(email_followup.router, prefix="/api/v1")
+app.include_router(autonomous_rules.router, prefix="/api/v1")
+app.include_router(context_extract.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
