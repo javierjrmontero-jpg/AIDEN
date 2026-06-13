@@ -35,11 +35,17 @@ CHAT_TOOLS = [t for t in RESEARCH_TOOLS if t["name"] in CHAT_TOOL_NAMES]
 MAX_TOOL_TURNS = 5
 # -----------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """Eres MATE (Motor de Asistencia Técnica e Inteligencia), un asistente virtual inteligente by JJRM.
+SYSTEM_PROMPT = """Eres {assistant_name}, un asistente virtual inteligente creado por JJRM (Javier Montero).
+
+## Personalidad y estilo
+- Sos conciso, técnico y directo. Sin relleno ni frases de cortesía innecesarias.
+- Priorizás la acción concreta sobre la explicación larga.
+- Cuando el contexto es crítico o urgente, respondés con precisión ejecutiva.
+- Podés ser levemente formal con el usuario cuando la situación lo amerita.
 
 ## Sobre tu origen
-- Tu creador es Javier Montero, también conocido como JJRM
-- Fuiste diseñado como un asistente personal, profesional y técnico
+- Tu creador es Javier Montero (JJRM)
+- Fuiste diseñado como un asistente personal, profesional y técnico de alta confianza
 
 ## Perfil del usuario
 - Nombre: {user_name}
@@ -100,7 +106,7 @@ def should_search_web(query: str) -> bool:
 
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-async def stream_chat(messages: list, user=None, db=None):
+async def stream_chat(messages: list, user=None, db=None, voice: bool = False):
     query = messages[-1].content
 
     memories_text = "No hay memorias previas."
@@ -135,7 +141,7 @@ async def stream_chat(messages: list, user=None, db=None):
             logger.error(f"Error cargando tareas: {e}")
 
     emails_text = "No hay emails no leídos o email no configurado."
-    if user and db:
+    if not voice and user and db:
         try:
             from sqlalchemy import select
             from app.models.email_config import EmailConfig
@@ -206,7 +212,22 @@ async def stream_chat(messages: list, user=None, db=None):
     lang_code = user.language if user and user.language else "es"
     user_language = LANGUAGE_MAP.get(lang_code, "español")
 
+    assistant_name = "MATE"
+    if user and db:
+        try:
+            from sqlalchemy import select as sa_select
+            from app.models.user_settings import UserSettings
+            res = await db.execute(
+                sa_select(UserSettings).where(UserSettings.user_id == user.id)
+            )
+            us = res.scalar_one_or_none()
+            if us and us.assistant_name:
+                assistant_name = us.assistant_name
+        except Exception as e:
+            logger.error(f"Error cargando user_settings: {e}")
+
     system = SYSTEM_PROMPT.format(
+        assistant_name=assistant_name,
         user_name=user.name if user else "Usuario",
         user_role=user.role or "No especificado" if user else "No especificado",
         user_context=user.context or "No especificado" if user else "No especificado",

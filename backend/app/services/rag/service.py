@@ -21,7 +21,11 @@ chroma_client = chromadb.PersistentClient(
     path=CHROMA_PATH,
     settings=Settings(anonymized_telemetry=False)
 )
-embedding_model = TextEmbedding("BAAI/bge-small-en-v1.5")
+try:
+    embedding_model = TextEmbedding("BAAI/bge-small-en-v1.5")
+except Exception as _rag_err:
+    logger.warning(f"RAG embedding model no disponible (sin internet?): {_rag_err}")
+    embedding_model = None
 
 def get_collection(user_id: str):
     return chroma_client.get_or_create_collection(
@@ -106,6 +110,9 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list:
     return chunks
 
 def index_document(user_id: str, doc_id: str, filename: str, text: str) -> int:
+    if embedding_model is None:
+        logger.warning("RAG deshabilitado: modelo no disponible")
+        return 0
     chunks = chunk_text(text)
     if not chunks:
         return 0
@@ -120,6 +127,8 @@ def index_document(user_id: str, doc_id: str, filename: str, text: str) -> int:
     return len(chunks)
 
 def search_documents(user_id: str, query: str, n_results: int = 5) -> list:
+    if embedding_model is None:
+        return []
     try:
         collection = get_collection(user_id)
         if collection.count() == 0:
