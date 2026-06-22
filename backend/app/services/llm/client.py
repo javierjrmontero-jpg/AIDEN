@@ -124,7 +124,7 @@ def should_search_web(query: str) -> bool:
 
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-async def stream_chat(messages: list, user=None, db=None):
+async def stream_chat(messages: list, user=None, db=None, voice: bool = False):
     query = messages[-1].content
 
     # Memorias del usuario
