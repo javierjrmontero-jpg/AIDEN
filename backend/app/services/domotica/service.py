@@ -57,7 +57,8 @@ async def _ha_get_devices(client: httpx.AsyncClient) -> list[Device]:
     try:
         r = await client.get(f"{url}/api/states", headers=headers, timeout=8)
         r.raise_for_status()
-        skip = ("automation.", "input_", "person.", "zone.", "sun.", "weather.")
+        skip = ("automation.", "input_", "person.", "zone.", "sun.", "weather.",
+                "conversation.", "tts.", "todo.", "event.", "update.", "sensor.backup")
         devices = []
         for s in r.json():
             eid = s["entity_id"]
