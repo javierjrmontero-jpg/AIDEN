@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -19,6 +19,13 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _FRONTEND_LOGIN = "https://mate.molmont.com.ar/login"
+
+
+def _js_redirect(url: str) -> HTMLResponse:
+    """Return 200 HTML with JS redirect to bypass Cloudflare 502 on 307 responses."""
+    safe_url = url.replace('"', "%22")
+    html = f'<html><head><script>window.location.replace("{safe_url}");</script></head><body>Redirigiendo...</body></html>'
+    return HTMLResponse(content=html)
 
 
 def _make_state() -> str:
@@ -97,10 +104,10 @@ async def google_callback(
     db: AsyncSession = Depends(get_db),
 ):
     if error or not code:
-        return RedirectResponse(f"{_FRONTEND_LOGIN}?error=google_denied")
+        return _js_redirect(f"{_FRONTEND_LOGIN}?error=google_denied")
     if not state or not _verify_state(state):
         logger.warning("Google OAuth: state verification failed")
-        return RedirectResponse(f"{_FRONTEND_LOGIN}?error=state_mismatch")
+        return _js_redirect(f"{_FRONTEND_LOGIN}?error=state_mismatch")
 
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(_GOOGLE_TOKEN_URL, data={
@@ -112,7 +119,7 @@ async def google_callback(
         })
         if token_resp.status_code != 200:
             logger.error(f"Google token exchange failed: {token_resp.text}")
-            return RedirectResponse(f"{_FRONTEND_LOGIN}?error=token_exchange")
+            return _js_redirect(f"{_FRONTEND_LOGIN}?error=token_exchange")
 
         access_token = token_resp.json().get("access_token")
         userinfo_resp = await client.get(
@@ -120,21 +127,21 @@ async def google_callback(
             headers={"Authorization": f"Bearer {access_token}"},
         )
         if userinfo_resp.status_code != 200:
-            return RedirectResponse(f"{_FRONTEND_LOGIN}?error=userinfo")
+            return _js_redirect(f"{_FRONTEND_LOGIN}?error=userinfo")
 
         userinfo = userinfo_resp.json()
 
     email = userinfo.get("email")
     if not email:
-        return RedirectResponse(f"{_FRONTEND_LOGIN}?error=no_email")
+        return _js_redirect(f"{_FRONTEND_LOGIN}?error=no_email")
 
     name = userinfo.get("name") or email.split("@")[0]
     user = await _find_or_create_oauth_user(db, email, name)
     if not user:
-        return RedirectResponse(f"{_FRONTEND_LOGIN}?error=not_allowed")
+        return _js_redirect(f"{_FRONTEND_LOGIN}?error=not_allowed")
 
     token = create_token(user.id, user.email)
-    return RedirectResponse(f"{_FRONTEND_LOGIN}?{urlencode({'token': token, 'name': user.name, 'email': user.email})}")
+    return _js_redirect(f"{_FRONTEND_LOGIN}?{urlencode({'token': token, 'name': user.name, 'email': user.email})}")
 
 
 # ── Microsoft ─────────────────────────────────────────────────────────────────
@@ -179,10 +186,10 @@ async def microsoft_callback(
     db: AsyncSession = Depends(get_db),
 ):
     if error or not code:
-        return RedirectResponse(f"{_FRONTEND_LOGIN}?error=microsoft_denied")
+        return _js_redirect(f"{_FRONTEND_LOGIN}?error=microsoft_denied")
     if not state or not _verify_state(state):
         logger.warning("Microsoft OAuth: state verification failed")
-        return RedirectResponse(f"{_FRONTEND_LOGIN}?error=state_mismatch")
+        return _js_redirect(f"{_FRONTEND_LOGIN}?error=state_mismatch")
 
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(_MS_TOKEN_URL, data={
@@ -195,7 +202,7 @@ async def microsoft_callback(
         })
         if token_resp.status_code != 200:
             logger.error(f"Microsoft token exchange failed: {token_resp.text}")
-            return RedirectResponse(f"{_FRONTEND_LOGIN}?error=token_exchange")
+            return _js_redirect(f"{_FRONTEND_LOGIN}?error=token_exchange")
 
         access_token = token_resp.json().get("access_token")
         userinfo_resp = await client.get(
@@ -203,18 +210,18 @@ async def microsoft_callback(
             headers={"Authorization": f"Bearer {access_token}"},
         )
         if userinfo_resp.status_code != 200:
-            return RedirectResponse(f"{_FRONTEND_LOGIN}?error=userinfo")
+            return _js_redirect(f"{_FRONTEND_LOGIN}?error=userinfo")
 
         userinfo = userinfo_resp.json()
 
     email = userinfo.get("mail") or userinfo.get("userPrincipalName")
     if not email:
-        return RedirectResponse(f"{_FRONTEND_LOGIN}?error=no_email")
+        return _js_redirect(f"{_FRONTEND_LOGIN}?error=no_email")
 
     name = userinfo.get("displayName") or email.split("@")[0]
     user = await _find_or_create_oauth_user(db, email, name)
     if not user:
-        return RedirectResponse(f"{_FRONTEND_LOGIN}?error=not_allowed")
+        return _js_redirect(f"{_FRONTEND_LOGIN}?error=not_allowed")
 
     token = create_token(user.id, user.email)
-    return RedirectResponse(f"{_FRONTEND_LOGIN}?{urlencode({'token': token, 'name': user.name, 'email': user.email})}")
+    return _js_redirect(f"{_FRONTEND_LOGIN}?{urlencode({'token': token, 'name': user.name, 'email': user.email})}")
