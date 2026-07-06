@@ -25,8 +25,9 @@ class ChatRequest(BaseModel):
     messages: List[Message]
     conversation_id: Optional[str] = None
     voice: bool = False
+    provider: str = "anthropic"  # "anthropic" | "openai" | "gemini"
 
-async def stream_and_save(messages, conversation_id, user, db, voice: bool = False):
+async def stream_and_save(messages, conversation_id, user, db, voice: bool = False, provider: str = "anthropic"):
     full_response = ""
     executed_tools = []   # tools ejecutadas en este turno
     order = len(messages)
@@ -34,7 +35,7 @@ async def stream_and_save(messages, conversation_id, user, db, voice: bool = Fal
     user_msg = messages[-1]
     await save_message(db, conversation_id, user_msg.role, user_msg.content, order - 1)
 
-    async for chunk in stream_chat(messages, user, db, voice=voice):
+    async for chunk in stream_chat(messages, user, db, voice=voice, provider=provider):
         if chunk.startswith("data: ") and chunk.strip() not in ["data: [DONE]"]:
             try:
                 parsed = _json.loads(chunk[6:])
@@ -88,6 +89,6 @@ async def chat(
         conversation_id = conv.id
 
     return StreamingResponse(
-        stream_and_save(request.messages, conversation_id, current_user, db, voice=request.voice),
+        stream_and_save(request.messages, conversation_id, current_user, db, voice=request.voice, provider=request.provider),
         media_type="text/event-stream"
     )

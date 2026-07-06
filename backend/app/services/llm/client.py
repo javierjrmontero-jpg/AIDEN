@@ -124,7 +124,7 @@ def should_search_web(query: str) -> bool:
 
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-async def stream_chat(messages: list, user=None, db=None, voice: bool = False):
+async def stream_chat(messages: list, user=None, db=None, voice: bool = False, provider: str = "anthropic"):
     query = messages[-1].content
 
     # Memorias del usuario
@@ -250,6 +250,19 @@ async def stream_chat(messages: list, user=None, db=None, voice: bool = False):
         calendar_context=calendar_text,
         fecha=datetime.now().strftime("%d/%m/%Y %H:%M"),
     )
+
+    # --- Providers alternativos (sin tool-loop) --------------------------------
+    if provider == "openai":
+        from app.services.llm.providers.openai_provider import stream_openai
+        async for chunk in stream_openai(system, messages):
+            yield chunk
+        return
+    if provider == "gemini":
+        from app.services.llm.providers.gemini_provider import stream_gemini
+        async for chunk in stream_gemini(system, messages):
+            yield chunk
+        return
+    # --------------------------------------------------------------------------
 
     # --- Tool-loop: streaming + ejecución de herramientas hasta end_turn -----
     # Conversación mutable: arranca con los mensajes del usuario y va sumando

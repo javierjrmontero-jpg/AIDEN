@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     GOOGLE_CALENDAR_ENABLED: bool = True
     MICROSOFT_CLIENT_ID: str = ""
     WHISPER_MODEL: str = "base"
+    OPENAI_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    N8N_URL: str = ""
+    N8N_WEBHOOK_URL: str = ""
+    N8N_API_KEY: str = ""
     class Config:
         env_file = ".env"
 

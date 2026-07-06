@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import chat, conversations, auth, documents, generate, memories, sandbox, admin, tasks, email, stats, agent, calendar, voice, audit, briefing, briefing_weekly, tasks_prioritize, email_followup, autonomous_rules, context_extract, user_settings, domotica
+from app.api import chat, conversations, auth, documents, generate, memories, sandbox, admin, tasks, email, stats, agent, calendar, voice, audit, briefing, briefing_weekly, tasks_prioritize, email_followup, autonomous_rules, context_extract, user_settings, domotica, webhook
 from app.core.config import settings
 from app.core.database import init_db
 
@@ -53,6 +53,7 @@ app.include_router(autonomous_rules.router, prefix="/api/v1")
 app.include_router(context_extract.router, prefix="/api/v1")
 app.include_router(user_settings.router, prefix="/api/v1")
 app.include_router(domotica.router, prefix="/api/v1")
+app.include_router(webhook.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
