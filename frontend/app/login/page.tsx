@@ -25,10 +25,11 @@ function LoginContent() {
     if (oauthError) {
       const msgs: Record<string, string> = {
         google_denied: "Acceso con Google cancelado",
+        microsoft_denied: "Acceso con Microsoft cancelado",
         state_mismatch: "Error de seguridad en OAuth. Intentá de nuevo",
-        token_exchange: "Error al comunicarse con Google",
+        token_exchange: "Error al comunicarse con el proveedor",
         userinfo: "No se pudo obtener información de tu cuenta",
-        no_email: "Google no devolvió un email válido",
+        no_email: "El proveedor no devolvió un email válido",
       };
       setError(msgs[oauthError] || "Error al iniciar sesión con Google");
       return;
@@ -85,6 +86,10 @@ function LoginContent() {
 
   const handleGoogleLogin = () => {
     window.location.href = `${API_URL}/api/v1/auth/google`;
+  };
+
+  const handleMicrosoftLogin = () => {
+    window.location.href = `${API_URL}/api/v1/auth/microsoft`;
   };
 
   return (
@@ -184,6 +189,20 @@ function LoginContent() {
               <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
             </svg>
             Continuar con Google
+          </button>
+
+          {/* Microsoft OAuth */}
+          <button
+            onClick={handleMicrosoftLogin}
+            className="w-full mt-2 py-3 bg-[#2F2F2F] hover:bg-[#1a1a1a] text-white rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24">
+              <path fill="#F25022" d="M0 0h11.5v11.5H0z"/>
+              <path fill="#7FBA00" d="M12.5 0H24v11.5H12.5z"/>
+              <path fill="#00A4EF" d="M0 12.5h11.5V24H0z"/>
+              <path fill="#FFB900" d="M12.5 12.5H24V24H12.5z"/>
+            </svg>
+            Continuar con Microsoft
           </button>
         </div>
       </div>

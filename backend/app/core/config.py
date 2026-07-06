@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_CALENDAR_ENABLED: bool = True
     MICROSOFT_CLIENT_ID: str = ""
+    MICROSOFT_CLIENT_SECRET: str = ""
     WHISPER_MODEL: str = "base"
     OPENAI_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
