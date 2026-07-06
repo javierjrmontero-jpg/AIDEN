@@ -1,6 +1,9 @@
+import hashlib
+import hmac
 import secrets
+import time
 import uuid
-from urllib.parse import urlencode, quote
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -13,34 +16,56 @@ from app.services.auth.service import create_token, create_user, get_user_by_ema
 
 router = APIRouter()
 
+_FRONTEND_LOGIN = "https://mate.molmont.com.ar/login"
+
+
+def _make_state() -> str:
+    """Generate a state token signed with SECRET_KEY (no cookie needed)."""
+    nonce = secrets.token_urlsafe(16)
+    ts = str(int(time.time()))
+    msg = f"{nonce}:{ts}"
+    sig = hmac.new(settings.SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
+    return f"{msg}:{sig}"
+
+
+def _verify_state(state: str) -> bool:
+    """Verify HMAC-signed state, reject if >5 min old."""
+    try:
+        nonce, ts, sig = state.rsplit(":", 2)
+        msg = f"{nonce}:{ts}"
+        expected = hmac.new(settings.SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return False
+        if time.time() - int(ts) > 300:
+            return False
+        return True
+    except Exception:
+        return False
+
+
 # ── Google ────────────────────────────────────────────────────────────────────
 _GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
-_REDIRECT_URI = "https://mate.molmont.com.ar/api/v1/auth/google/callback"
-_FRONTEND_LOGIN = "https://mate.molmont.com.ar/login"
+_GOOGLE_REDIRECT_URI = "https://mate.molmont.com.ar/api/v1/auth/google/callback"
 
 
 @router.get("/auth/google")
 async def google_login():
-    state = secrets.token_urlsafe(32)
     params = urlencode({
         "client_id": settings.GOOGLE_CLIENT_ID,
-        "redirect_uri": _REDIRECT_URI,
+        "redirect_uri": _GOOGLE_REDIRECT_URI,
         "response_type": "code",
         "scope": "openid email profile",
-        "state": state,
+        "state": _make_state(),
         "access_type": "offline",
         "prompt": "select_account",
     })
-    response = RedirectResponse(f"{_GOOGLE_AUTH_URL}?{params}")
-    response.set_cookie("oauth_state", state, max_age=300, secure=True, httponly=True, samesite="lax")
-    return response
+    return RedirectResponse(f"{_GOOGLE_AUTH_URL}?{params}")
 
 
 @router.get("/auth/google/callback")
 async def google_callback(
-    request: Request,
     code: str = None,
     state: str = None,
     error: str = None,
@@ -48,9 +73,7 @@ async def google_callback(
 ):
     if error or not code:
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=google_denied")
-
-    cookie_state = request.cookies.get("oauth_state")
-    if not cookie_state or cookie_state != state:
+    if not state or not _verify_state(state):
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=state_mismatch")
 
     async with httpx.AsyncClient() as client:
@@ -58,7 +81,7 @@ async def google_callback(
             "code": code,
             "client_id": settings.GOOGLE_CLIENT_ID,
             "client_secret": settings.GOOGLE_CLIENT_SECRET,
-            "redirect_uri": _REDIRECT_URI,
+            "redirect_uri": _GOOGLE_REDIRECT_URI,
             "grant_type": "authorization_code",
         })
         if token_resp.status_code != 200:
@@ -79,17 +102,12 @@ async def google_callback(
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=no_email")
 
     name = userinfo.get("name") or email.split("@")[0]
-
     user = await get_user_by_email(db, email)
     if not user:
-        # OAuth users get a random unusable password
         user = await create_user(db, email, name, f"OAUTH_{uuid.uuid4().hex}_Aa1!")
 
     token = create_token(user.id, user.email)
-    params = urlencode({"token": token, "name": user.name, "email": user.email})
-    response = RedirectResponse(f"{_FRONTEND_LOGIN}?{params}")
-    response.delete_cookie("oauth_state")
-    return response
+    return RedirectResponse(f"{_FRONTEND_LOGIN}?{urlencode({'token': token, 'name': user.name, 'email': user.email})}")
 
 
 # ── Microsoft ─────────────────────────────────────────────────────────────────
@@ -101,23 +119,19 @@ _MS_REDIRECT_URI = "https://mate.molmont.com.ar/api/v1/auth/microsoft/callback"
 
 @router.get("/auth/microsoft")
 async def microsoft_login():
-    state = secrets.token_urlsafe(32)
     params = urlencode({
         "client_id": settings.MICROSOFT_CLIENT_ID,
         "redirect_uri": _MS_REDIRECT_URI,
         "response_type": "code",
         "scope": "openid email profile User.Read",
-        "state": state,
+        "state": _make_state(),
         "prompt": "select_account",
     })
-    response = RedirectResponse(f"{_MS_AUTH_URL}?{params}")
-    response.set_cookie("ms_oauth_state", state, max_age=300, secure=True, httponly=True, samesite="lax")
-    return response
+    return RedirectResponse(f"{_MS_AUTH_URL}?{params}")
 
 
 @router.get("/auth/microsoft/callback")
 async def microsoft_callback(
-    request: Request,
     code: str = None,
     state: str = None,
     error: str = None,
@@ -125,9 +139,7 @@ async def microsoft_callback(
 ):
     if error or not code:
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=microsoft_denied")
-
-    cookie_state = request.cookies.get("ms_oauth_state")
-    if not cookie_state or cookie_state != state:
+    if not state or not _verify_state(state):
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=state_mismatch")
 
     async with httpx.AsyncClient() as client:
@@ -157,13 +169,9 @@ async def microsoft_callback(
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=no_email")
 
     name = userinfo.get("displayName") or email.split("@")[0]
-
     user = await get_user_by_email(db, email)
     if not user:
         user = await create_user(db, email, name, f"OAUTH_{uuid.uuid4().hex}_Aa1!")
 
     token = create_token(user.id, user.email)
-    params = urlencode({"token": token, "name": user.name, "email": user.email})
-    response = RedirectResponse(f"{_FRONTEND_LOGIN}?{params}")
-    response.delete_cookie("ms_oauth_state")
-    return response
+    return RedirectResponse(f"{_FRONTEND_LOGIN}?{urlencode({'token': token, 'name': user.name, 'email': user.email})}")
