@@ -1,6 +1,6 @@
 import bcrypt
 from jose import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.user import User
@@ -14,7 +14,7 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 def create_token(user_id: str, email: str) -> str:
-    expire = datetime.utcnow() + timedelta(hours=settings.JWT_EXPIRE_HOURS)
+    expire = datetime.now(timezone.utc) + timedelta(hours=settings.JWT_EXPIRE_HOURS)
     return jwt.encode(
         {"sub": user_id, "email": email, "exp": expire},
         settings.SECRET_KEY,

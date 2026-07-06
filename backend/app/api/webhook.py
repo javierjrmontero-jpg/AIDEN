@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from typing import Any, Optional
 import httpx
@@ -55,12 +55,17 @@ async def trigger_n8n(
 
 
 @router.post("/webhook/receive")
-async def receive_from_n8n(event: N8nEvent):
+async def receive_from_n8n(
+    event: N8nEvent,
+    x_webhook_secret: Optional[str] = Header(None),
+):
     """n8n → MATE: recibe un evento desde un workflow de n8n.
 
-    Configurar en n8n un nodo HTTP Request apuntando a:
-    POST https://mate.molmont.com.ar/api/v1/webhook/receive
+    Configurar en n8n: HTTP Request → POST https://mate.molmont.com.ar/api/v1/webhook/receive
+    Header requerido: X-Webhook-Secret: <WEBHOOK_SECRET del .env>
     """
+    if settings.WEBHOOK_SECRET and x_webhook_secret != settings.WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Webhook secret inválido")
     entry = {"event": event.event, "data": event.data, "source": event.source}
     _received_events.append(entry)
     if len(_received_events) > MAX_EVENTS:

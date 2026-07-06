@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 
 class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str
@@ -22,6 +23,15 @@ class Settings(BaseSettings):
     N8N_URL: str = ""
     N8N_WEBHOOK_URL: str = ""
     N8N_API_KEY: str = ""
+    WEBHOOK_SECRET: str = ""
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        if len(v) < 32:
+            raise ValueError("SECRET_KEY debe tener al menos 32 caracteres")
+        return v
+
     class Config:
         env_file = ".env"
 
