@@ -681,9 +681,9 @@ if (ttsEnabled) {
               className="bg-gray-800 text-gray-300 text-xs rounded-xl px-3 py-3 border border-gray-700 focus:border-blue-400 outline-none flex-shrink-0 cursor-pointer"
               title="Seleccionar IA"
             >
-              <option value="anthropic">Claude</option>
-              <option value="openai">GPT-4o</option>
-              <option value="gemini">Gemini</option>
+              <option value="anthropic">MATE · Claude ★</option>
+              <option value="openai">MATE · GPT-4o</option>
+              <option value="gemini">MATE · Gemini</option>
             </select>
             <textarea
               ref={textareaRef}
