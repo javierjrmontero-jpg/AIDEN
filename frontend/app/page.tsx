@@ -55,6 +55,7 @@ export default function Home() {
   const { notifications, notify, dismiss } = useNotifications();
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [voiceLang, setVoiceLang] = useState("es-AR");
+  const [provider, setProvider] = useState<"anthropic" | "openai" | "gemini">("anthropic");
   const { speak, stop } = useTTS(voiceLang);
   const [pendingEmail, setPendingEmail] = useState<null | {
     to: string;
@@ -293,7 +294,7 @@ useEffect(() => {
       const response = await fetch(`${API_URL}/api/v1/chat`, {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ messages: newMessages, conversation_id: conversationId }),
+        body: JSON.stringify({ messages: newMessages, conversation_id: conversationId, provider }),
       });
       if (response.status === 401) { logout(); return; }
 
@@ -674,6 +675,16 @@ if (ttsEnabled) {
 
        <div className="px-4 py-4 border-t border-gray-800 bg-gray-900">
          <div className="flex gap-2 max-w-4xl mx-auto items-end w-full">
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value as "anthropic" | "openai" | "gemini")}
+              className="bg-gray-800 text-gray-300 text-xs rounded-xl px-3 py-3 border border-gray-700 focus:border-blue-400 outline-none flex-shrink-0 cursor-pointer"
+              title="Seleccionar IA"
+            >
+              <option value="anthropic">Claude</option>
+              <option value="openai">GPT-4o</option>
+              <option value="gemini">Gemini</option>
+            </select>
             <textarea
               ref={textareaRef}
               className="flex-1 bg-gray-800 text-gray-100 rounded-xl px-4 py-3 text-sm resize-none outline-none border border-gray-700 focus:border-blue-400 transition-colors placeholder-gray-500 min-w-0"
