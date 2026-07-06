@@ -89,8 +89,14 @@ function LoginContent() {
     window.location.href = `${API_URL}/api/v1/auth/google`;
   };
 
-  const handleMicrosoftLogin = () => {
-    window.location.href = `${API_URL}/api/v1/auth/microsoft`;
+  const handleMicrosoftLogin = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/auth/microsoft/url`);
+      const data = await res.json();
+      window.location.href = data.url;
+    } catch {
+      setError("No se pudo conectar con Microsoft");
+    }
   };
 
   return (

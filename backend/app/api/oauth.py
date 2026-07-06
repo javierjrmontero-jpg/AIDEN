@@ -157,6 +157,20 @@ async def microsoft_login():
     return RedirectResponse(f"{_MS_AUTH_URL}?{params}")
 
 
+@router.get("/auth/microsoft/url")
+async def microsoft_login_url():
+    """Returns the Microsoft OAuth URL as JSON so the frontend can redirect client-side."""
+    params = urlencode({
+        "client_id": settings.MICROSOFT_CLIENT_ID,
+        "redirect_uri": _MS_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile User.Read",
+        "state": _make_state(),
+        "prompt": "select_account",
+    })
+    return {"url": f"{_MS_AUTH_URL}?{params}"}
+
+
 @router.get("/auth/microsoft/callback")
 async def microsoft_callback(
     code: str = None,
