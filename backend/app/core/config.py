@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     N8N_WEBHOOK_URL: str = ""
     N8N_API_KEY: str = ""
     WEBHOOK_SECRET: str = ""
+    OAUTH_ADMIN_EMAIL: str = "javierjrmontero@outlook.com"
 
     @field_validator("SECRET_KEY")
     @classmethod

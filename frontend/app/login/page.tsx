@@ -30,6 +30,7 @@ function LoginContent() {
         token_exchange: "Error al comunicarse con el proveedor",
         userinfo: "No se pudo obtener información de tu cuenta",
         no_email: "El proveedor no devolvió un email válido",
+        not_allowed: "Tu cuenta no está autorizada. Contactá al administrador.",
       };
       setError(msgs[oauthError] || "Error al iniciar sesión con Google");
       return;

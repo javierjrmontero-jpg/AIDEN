@@ -119,6 +119,35 @@ async def update_profile(
     return {"status": "updated"}
 
 
+class InviteRequest(BaseModel):
+    email: EmailStr
+    name: str
+
+
+@router.post("/auth/invite")
+async def invite_user(
+    body: InviteRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Solo el administrador puede invitar usuarios")
+    existing = await get_user_by_email(db, body.email)
+    if existing:
+        raise HTTPException(status_code=400, detail="El email ya está registrado")
+    import uuid
+    from app.services.auth.service import hash_password
+    invited = User(
+        id=str(uuid.uuid4()),
+        email=body.email,
+        name=body.name,
+        hashed_password=hash_password(f"INVITE_{uuid.uuid4().hex}_Aa1!"),
+    )
+    db.add(invited)
+    await db.commit()
+    return {"status": "invited", "email": body.email, "name": body.name}
+
+
 @router.put("/auth/password")
 async def change_password(
     request: PasswordChangeRequest,

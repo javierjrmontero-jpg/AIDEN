@@ -1,12 +1,13 @@
 import hashlib
 import hmac
+import logging
 import secrets
 import time
 import uuid
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,12 +16,12 @@ from app.core.database import get_db
 from app.services.auth.service import create_token, create_user, get_user_by_email
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _FRONTEND_LOGIN = "https://mate.molmont.com.ar/login"
 
 
 def _make_state() -> str:
-    """Generate a state token signed with SECRET_KEY (no cookie needed)."""
     nonce = secrets.token_urlsafe(16)
     ts = str(int(time.time()))
     msg = f"{nonce}:{ts}"
@@ -29,7 +30,6 @@ def _make_state() -> str:
 
 
 def _verify_state(state: str) -> bool:
-    """Verify HMAC-signed state, reject if >5 min old."""
     try:
         nonce, ts, sig = state.rsplit(":", 2)
         msg = f"{nonce}:{ts}"
@@ -41,6 +41,31 @@ def _verify_state(state: str) -> bool:
         return True
     except Exception:
         return False
+
+
+async def _find_or_create_oauth_user(db: AsyncSession, email: str, name: str):
+    """
+    Allow login only if:
+    - User already exists in DB, OR
+    - Email matches OAUTH_ADMIN_EMAIL (first-time admin bootstrap)
+    Returns user or None if access denied.
+    """
+    user = await get_user_by_email(db, email)
+    if user:
+        return user
+
+    admin_email = settings.OAUTH_ADMIN_EMAIL.strip().lower()
+    if email.strip().lower() == admin_email:
+        logger.info(f"OAuth: bootstrapping admin user {email}")
+        user = await create_user(db, email, name, f"OAUTH_{uuid.uuid4().hex}_Aa1!")
+        # Mark as admin
+        user.is_admin = True
+        await db.commit()
+        await db.refresh(user)
+        return user
+
+    logger.warning(f"OAuth: access denied for unregistered email {email}")
+    return None
 
 
 # ── Google ────────────────────────────────────────────────────────────────────
@@ -74,6 +99,7 @@ async def google_callback(
     if error or not code:
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=google_denied")
     if not state or not _verify_state(state):
+        logger.warning("Google OAuth: state verification failed")
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=state_mismatch")
 
     async with httpx.AsyncClient() as client:
@@ -85,6 +111,7 @@ async def google_callback(
             "grant_type": "authorization_code",
         })
         if token_resp.status_code != 200:
+            logger.error(f"Google token exchange failed: {token_resp.text}")
             return RedirectResponse(f"{_FRONTEND_LOGIN}?error=token_exchange")
 
         access_token = token_resp.json().get("access_token")
@@ -102,9 +129,9 @@ async def google_callback(
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=no_email")
 
     name = userinfo.get("name") or email.split("@")[0]
-    user = await get_user_by_email(db, email)
+    user = await _find_or_create_oauth_user(db, email, name)
     if not user:
-        user = await create_user(db, email, name, f"OAUTH_{uuid.uuid4().hex}_Aa1!")
+        return RedirectResponse(f"{_FRONTEND_LOGIN}?error=not_allowed")
 
     token = create_token(user.id, user.email)
     return RedirectResponse(f"{_FRONTEND_LOGIN}?{urlencode({'token': token, 'name': user.name, 'email': user.email})}")
@@ -140,6 +167,7 @@ async def microsoft_callback(
     if error or not code:
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=microsoft_denied")
     if not state or not _verify_state(state):
+        logger.warning("Microsoft OAuth: state verification failed")
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=state_mismatch")
 
     async with httpx.AsyncClient() as client:
@@ -152,6 +180,7 @@ async def microsoft_callback(
             "scope": "openid email profile User.Read",
         })
         if token_resp.status_code != 200:
+            logger.error(f"Microsoft token exchange failed: {token_resp.text}")
             return RedirectResponse(f"{_FRONTEND_LOGIN}?error=token_exchange")
 
         access_token = token_resp.json().get("access_token")
@@ -169,9 +198,9 @@ async def microsoft_callback(
         return RedirectResponse(f"{_FRONTEND_LOGIN}?error=no_email")
 
     name = userinfo.get("displayName") or email.split("@")[0]
-    user = await get_user_by_email(db, email)
+    user = await _find_or_create_oauth_user(db, email, name)
     if not user:
-        user = await create_user(db, email, name, f"OAUTH_{uuid.uuid4().hex}_Aa1!")
+        return RedirectResponse(f"{_FRONTEND_LOGIN}?error=not_allowed")
 
     token = create_token(user.id, user.email)
     return RedirectResponse(f"{_FRONTEND_LOGIN}?{urlencode({'token': token, 'name': user.name, 'email': user.email})}")
