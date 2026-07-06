@@ -14,6 +14,23 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
 
+def _validate_password(v: str) -> None:
+    """NIST SP 800-63B + OWASP: mínimo 8 chars, mayúscula, minúscula, número y carácter especial."""
+    errors = []
+    if len(v) < 8:
+        errors.append("al menos 8 caracteres")
+    if not any(c.isupper() for c in v):
+        errors.append("al menos una mayúscula")
+    if not any(c.islower() for c in v):
+        errors.append("al menos una minúscula")
+    if not any(c.isdigit() for c in v):
+        errors.append("al menos un número")
+    if not any(c in r"""!@#$%^&*()_+-=[]{}|;':",.<>?/`~\\""" for c in v):
+        errors.append("al menos un carácter especial (!@#$%...)")
+    if errors:
+        raise ValueError("La contraseña debe tener: " + ", ".join(errors))
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     name: str
@@ -22,8 +39,7 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def password_strength(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("La contraseña debe tener al menos 8 caracteres")
+        _validate_password(v)
         return v
 
 
@@ -39,8 +55,7 @@ class PasswordChangeRequest(BaseModel):
     @field_validator("new_password")
     @classmethod
     def password_strength(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("La contraseña debe tener al menos 8 caracteres")
+        _validate_password(v)
         return v
 
 
