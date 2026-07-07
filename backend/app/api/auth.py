@@ -76,6 +76,9 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
     user = await get_user_by_email(db, body.email)
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Email o contraseña incorrectos")
+    if user.totp_enabled:
+        from app.api.mfa import make_mfa_token
+        return {"mfa_required": True, "mfa_token": make_mfa_token(user.id)}
     token = create_token(user.id, user.email)
     return {"token": token, "name": user.name, "email": user.email}
 

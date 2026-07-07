@@ -14,6 +14,8 @@ function LoginContent() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState("");
 
   // Handle Google OAuth callback: /login?token=...&name=...&email=...
   useEffect(() => {
@@ -70,6 +72,11 @@ function LoginContent() {
         return;
       }
 
+      if (data.mfa_required) {
+        setMfaToken(data.mfa_token);
+        return;
+      }
+
       localStorage.setItem("mate_token", data.token);
       localStorage.setItem("mate_user", JSON.stringify({ name: data.name, email: data.email }));
       router.push("/");
@@ -85,6 +92,34 @@ function LoginContent() {
     if (e.key === "Enter") handleSubmit();
   };
 
+  const handleTotpSubmit = async () => {
+    if (!totpCode || totpCode.length !== 6) {
+      setError("Ingresá el código de 6 dígitos");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_URL}/api/v1/auth/mfa/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mfa_token: mfaToken, code: totpCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.detail || "Código inválido");
+        return;
+      }
+      localStorage.setItem("mate_token", data.token);
+      localStorage.setItem("mate_user", JSON.stringify({ name: data.name, email: data.email }));
+      router.push("/");
+    } catch {
+      setError("No se pudo conectar con MATE");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleGoogleLogin = () => {
     window.location.href = `${API_URL}/api/v1/auth/google`;
   };
@@ -98,6 +133,51 @@ function LoginContent() {
       setError("No se pudo conectar con Microsoft");
     }
   };
+
+  if (mfaToken) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-950 text-gray-100">
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-8">
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <h1 className="text-2xl font-bold tracking-wide">MATE</h1>
+            </div>
+            <p className="text-xs text-gray-500">Verificación en dos pasos</p>
+          </div>
+          <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+            <p className="text-sm text-gray-400 text-center mb-4">
+              Ingresá el código de 6 dígitos de tu aplicación autenticadora
+            </p>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="000000"
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ""))}
+              onKeyDown={(e) => e.key === "Enter" && handleTotpSubmit()}
+              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-center tracking-widest outline-none focus:border-emerald-500 transition-colors placeholder-gray-500"
+            />
+            {error && <p className="text-red-400 text-xs mt-3 text-center">{error}</p>}
+            <button
+              onClick={handleTotpSubmit}
+              disabled={loading}
+              className="w-full mt-4 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-xl text-sm font-medium transition-colors"
+            >
+              {loading ? "..." : "Verificar"}
+            </button>
+            <button
+              onClick={() => { setMfaToken(null); setTotpCode(""); setError(""); }}
+              className="w-full mt-2 py-2 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              Volver al inicio de sesión
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center justify-center h-screen bg-gray-950 text-gray-100">

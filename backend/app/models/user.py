@@ -19,3 +19,7 @@ class User(Base):
     context = Column(Text, nullable=True)
     preferences = Column(Text, nullable=True)
     language = Column(String(10), default="es")
+
+    # MFA
+    totp_secret = Column(String, nullable=True)
+    totp_enabled = Column(Boolean, default=False)

@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 from app.models.conversation import Base
 import os
 
@@ -21,6 +22,15 @@ async def init_db():
     os.makedirs("/data/db", exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migrate existing DBs: add MFA columns if missing
+        for col, ddl in [
+            ("totp_secret", "ALTER TABLE users ADD COLUMN totp_secret VARCHAR"),
+            ("totp_enabled", "ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN DEFAULT 0"),
+        ]:
+            try:
+                await conn.execute(text(ddl))
+            except Exception:
+                pass  # column already exists
 
 async def get_db():
     async with AsyncSessionLocal() as session:
