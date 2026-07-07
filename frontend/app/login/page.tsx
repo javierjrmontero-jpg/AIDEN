@@ -41,7 +41,7 @@ function LoginContent() {
     if (token && oauthName && oauthEmail) {
       localStorage.setItem("mate_token", token);
       localStorage.setItem("mate_user", JSON.stringify({ name: oauthName, email: oauthEmail }));
-      router.push("/");
+      router.replace("/");
     }
   }, [searchParams, router]);
 
@@ -79,7 +79,7 @@ function LoginContent() {
 
       localStorage.setItem("mate_token", data.token);
       localStorage.setItem("mate_user", JSON.stringify({ name: data.name, email: data.email }));
-      router.push("/");
+      router.replace("/");
 
     } catch {
       setError("No se pudo conectar con MATE");
@@ -112,7 +112,7 @@ function LoginContent() {
       }
       localStorage.setItem("mate_token", data.token);
       localStorage.setItem("mate_user", JSON.stringify({ name: data.name, email: data.email }));
-      router.push("/");
+      router.replace("/");
     } catch {
       setError("No se pudo conectar con MATE");
     } finally {

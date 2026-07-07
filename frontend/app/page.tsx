@@ -102,7 +102,7 @@ useEffect(() => {
   const logout = () => {
     localStorage.removeItem("mate_token");
     localStorage.removeItem("mate_user");
-    router.push("/login");
+    router.replace("/login");
   };
 
   useEffect(() => {
