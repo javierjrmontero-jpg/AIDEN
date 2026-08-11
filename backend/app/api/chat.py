@@ -25,9 +25,8 @@ class ChatRequest(BaseModel):
     messages: List[Message]
     conversation_id: Optional[str] = None
     voice: bool = False
-    provider: str = "anthropic"  # "anthropic" | "openai" | "gemini"
 
-async def stream_and_save(messages, conversation_id, user, db, voice: bool = False, provider: str = "anthropic"):
+async def stream_and_save(messages, conversation_id, user, db, voice: bool = False):
     full_response = ""
     executed_tools = []   # tools ejecutadas en este turno
     order = len(messages)
@@ -35,7 +34,7 @@ async def stream_and_save(messages, conversation_id, user, db, voice: bool = Fal
     user_msg = messages[-1]
     await save_message(db, conversation_id, user_msg.role, user_msg.content, order - 1)
 
-    async for chunk in stream_chat(messages, user, db, voice=voice, provider=provider):
+    async for chunk in stream_chat(messages, user, db, voice=voice):
         if chunk.startswith("data: ") and chunk.strip() not in ["data: [DONE]"]:
             try:
                 parsed = _json.loads(chunk[6:])
@@ -75,6 +74,21 @@ async def stream_and_save(messages, conversation_id, user, db, voice: bool = Fal
         except Exception as e:
             pass
 
+    # Registrar episodio en Graphiti (grafo de memoria temporal)
+    # Solo el último turno usuario+asistente para no saturar el grafo
+    if full_response and messages:
+        try:
+            from app.services.memory.graphiti_service import add_episode
+            user_text = messages[-1].content
+            episode_body = f"Usuario: {user_text}\nMATE: {full_response}"
+            await add_episode(
+                user_id=user.id,
+                content=episode_body,
+                source_description=f"MATE chat (conv: {conversation_id})",
+            )
+        except Exception:
+            pass  # Graphiti es opcional — nunca rompe el flujo
+
     yield "data: " + _json.dumps("[CONV:" + conversation_id + "]") + "\n\n"
 
 @router.post("/chat")
@@ -89,6 +103,6 @@ async def chat(
         conversation_id = conv.id
 
     return StreamingResponse(
-        stream_and_save(request.messages, conversation_id, current_user, db, voice=request.voice, provider=request.provider),
+        stream_and_save(request.messages, conversation_id, current_user, db, voice=request.voice),
         media_type="text/event-stream"
     )

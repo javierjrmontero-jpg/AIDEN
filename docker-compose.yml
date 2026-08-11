@@ -1,4 +1,26 @@
 services:
+  neo4j:
+    image: neo4j:5.20-community
+    container_name: mate-neo4j
+    # Sin port mapping al host: el backend lo alcanza por nombre Docker (neo4j:7687).
+    # Para debug puntual: docker exec mate-neo4j cypher-shell -u neo4j -p mateneo4j2024 'RETURN 1'
+    environment:
+      NEO4J_AUTH: neo4j/mateneo4j2024
+      # Límites de memoria para VM con recursos compartidos (~2.2 GiB disponibles)
+      NEO4J_server_memory_heap_initial__size: "256m"
+      NEO4J_server_memory_heap_max__size: "512m"
+      NEO4J_server_memory_pagecache_size: "128m"
+    volumes:
+      - ./data/neo4j/data:/data:z    # :z necesario en RHEL para SELinux
+      - ./data/neo4j/logs:/logs:z
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p mateneo4j2024 'RETURN 1' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s   # Neo4j tarda en iniciar la primera vez
+
   backend:
     build: ./backend
     container_name: aiden-backend
@@ -13,6 +35,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env
+    depends_on:
+      - neo4j     # Soft dependency — el backend arranca igual si neo4j no está healthy
     restart: unless-stopped
 
   frontend:
@@ -29,6 +53,9 @@ services:
   nginx:
     image: nginx:alpine
     container_name: mate-nginx
+    networks:
+      - default
+      - n8n_default
     ports:
       - "80:80"
       - "443:443"
@@ -39,3 +66,9 @@ services:
       - frontend
       - backend
     restart: unless-stopped
+
+networks:
+  default:
+    name: aiden_default    # Nombre explícito — no cambiar: cto-web, ae-web dependen de este nombre
+  n8n_default:
+    external: true         # Red creada por el stack de n8n en /opt/n8n

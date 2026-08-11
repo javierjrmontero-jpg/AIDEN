@@ -38,6 +38,38 @@ async def remove_memory(
     await delete_memory(db, memory_id, current_user.id)
     return {"status": "deleted"}
 
+@router.get("/memory/graph")
+async def query_graph_memory(
+    q: str = "",
+    limit: int = 5,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Consulta el grafo de memoria Graphiti del usuario."""
+    try:
+        from app.services.memory.graphiti_service import search_memory, is_available
+        available = await is_available()
+        if not available:
+            return {"available": False, "facts": [], "message": "Graphiti no disponible"}
+        facts = await search_memory(current_user.id, q or "usuario", limit=limit)
+        return {"available": True, "facts": facts, "count": len(facts)}
+    except Exception as e:
+        return {"available": False, "facts": [], "error": str(e)}
+
+
+@router.get("/memory/graph/status")
+async def graph_status(
+    current_user: User = Depends(get_current_user)
+):
+    """Verifica si Graphiti está disponible."""
+    try:
+        from app.services.memory.graphiti_service import is_available
+        available = await is_available()
+        return {"available": available}
+    except Exception:
+        return {"available": False}
+
+
 @router.post("/memories/extract/{conversation_id}")
 async def extract_memories(
     conversation_id: str,

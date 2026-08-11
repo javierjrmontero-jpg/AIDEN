@@ -24,8 +24,9 @@ google-auth==2.53.0
 google-auth-oauthlib==1.4.0
 google-auth-httplib2==0.4.0
 faster-whisper==1.2.1
-openai==1.52.0
-google-generativeai==0.8.3
-slowapi==0.1.9
-email-validator==2.2.0
-pyotp==2.9.0
+slowapi>=0.1.9
+email-validator>=2.0.0
+pyotp>=2.9.0
+# Graphiti — grafo de memoria temporal
+graphiti-core==0.3.19
+neo4j==5.28.4

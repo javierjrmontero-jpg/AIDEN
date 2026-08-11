@@ -124,10 +124,10 @@ def should_search_web(query: str) -> bool:
 
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-async def stream_chat(messages: list, user=None, db=None, voice: bool = False, provider: str = "anthropic"):
+async def stream_chat(messages: list, user=None, db=None, voice: bool = False):
     query = messages[-1].content
 
-    # Memorias del usuario
+    # Memorias del usuario (SQLite plano + Graphiti grafo temporal)
     memories_text = "No hay memorias previas."
     if user and db:
         try:
@@ -135,6 +135,17 @@ async def stream_chat(messages: list, user=None, db=None, voice: bool = False, p
             memories_text = await format_memories_for_prompt(db, user.id)
         except Exception as e:
             logger.error(f"Error cargando memorias: {e}")
+
+    # Enriquecer con contexto de Graphiti si está disponible
+    graphiti_context = ""
+    if user:
+        try:
+            from app.services.memory.graphiti_service import get_context_for_prompt
+            graphiti_context = await get_context_for_prompt(user.id, query)
+            if graphiti_context:
+                memories_text = f"{memories_text}\n\n{graphiti_context}"
+        except Exception as e:
+            logger.debug(f"Graphiti no disponible para contexto: {e}")
 
     # Tareas pendientes
     tasks_text = "No hay tareas pendientes."
@@ -250,19 +261,6 @@ async def stream_chat(messages: list, user=None, db=None, voice: bool = False, p
         calendar_context=calendar_text,
         fecha=datetime.now().strftime("%d/%m/%Y %H:%M"),
     )
-
-    # --- Providers alternativos (sin tool-loop) --------------------------------
-    if provider == "openai":
-        from app.services.llm.providers.openai_provider import stream_openai
-        async for chunk in stream_openai(system, messages):
-            yield chunk
-        return
-    if provider == "gemini":
-        from app.services.llm.providers.gemini_provider import stream_gemini
-        async for chunk in stream_gemini(system, messages):
-            yield chunk
-        return
-    # --------------------------------------------------------------------------
 
     # --- Tool-loop: streaming + ejecución de herramientas hasta end_turn -----
     # Conversación mutable: arranca con los mensajes del usuario y va sumando
