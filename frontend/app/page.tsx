@@ -55,7 +55,6 @@ export default function Home() {
   const { notifications, notify, dismiss } = useNotifications();
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [voiceLang, setVoiceLang] = useState("es-AR");
-  const [provider, setProvider] = useState<"anthropic" | "openai" | "gemini">("anthropic");
   const { speak, stop } = useTTS(voiceLang);
   const [pendingEmail, setPendingEmail] = useState<null | {
     to: string;
@@ -76,6 +75,13 @@ useEffect(() => {
   setToken(t);
   const userData = JSON.parse(u);
   setUser(userData);
+
+  // Sincronizar token con el orbe desktop (por si se inició después del login web)
+  fetch("http://localhost:27125/set-token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: t }),
+  }).catch(() => {}); // silencioso si el orbe no está activo
 
   fetch("/api/v1/auth/profile", {
   headers: { "Authorization": `Bearer ${t}` }
@@ -102,7 +108,7 @@ useEffect(() => {
   const logout = () => {
     localStorage.removeItem("mate_token");
     localStorage.removeItem("mate_user");
-    router.replace("/login");
+    router.push("/login");
   };
 
   useEffect(() => {
@@ -294,7 +300,7 @@ useEffect(() => {
       const response = await fetch(`${API_URL}/api/v1/chat`, {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ messages: newMessages, conversation_id: conversationId, provider }),
+        body: JSON.stringify({ messages: newMessages, conversation_id: conversationId }),
       });
       if (response.status === 401) { logout(); return; }
 
@@ -675,16 +681,6 @@ if (ttsEnabled) {
 
        <div className="px-4 py-4 border-t border-gray-800 bg-gray-900">
          <div className="flex gap-2 max-w-4xl mx-auto items-end w-full">
-            <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value as "anthropic" | "openai" | "gemini")}
-              className="bg-gray-800 text-gray-300 text-xs rounded-xl px-3 py-3 border border-gray-700 focus:border-blue-400 outline-none flex-shrink-0 cursor-pointer"
-              title="Seleccionar IA"
-            >
-              <option value="anthropic">MATE · Claude ★</option>
-              <option value="openai">MATE · GPT-4o</option>
-              <option value="gemini">MATE · Gemini</option>
-            </select>
             <textarea
               ref={textareaRef}
               className="flex-1 bg-gray-800 text-gray-100 rounded-xl px-4 py-3 text-sm resize-none outline-none border border-gray-700 focus:border-blue-400 transition-colors placeholder-gray-500 min-w-0"

@@ -41,6 +41,10 @@ function LoginContent() {
     if (token && oauthName && oauthEmail) {
       localStorage.setItem("mate_token", token);
       localStorage.setItem("mate_user", JSON.stringify({ name: oauthName, email: oauthEmail }));
+      fetch("http://localhost:27125/set-token", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      }).catch(() => {});
       router.replace("/");
     }
   }, [searchParams, router]);
@@ -79,6 +83,10 @@ function LoginContent() {
 
       localStorage.setItem("mate_token", data.token);
       localStorage.setItem("mate_user", JSON.stringify({ name: data.name, email: data.email }));
+      fetch("http://localhost:27125/set-token", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: data.token }),
+      }).catch(() => {});
       router.replace("/");
 
     } catch {
@@ -112,6 +120,10 @@ function LoginContent() {
       }
       localStorage.setItem("mate_token", data.token);
       localStorage.setItem("mate_user", JSON.stringify({ name: data.name, email: data.email }));
+      fetch("http://localhost:27125/set-token", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: data.token }),
+      }).catch(() => {});
       router.replace("/");
     } catch {
       setError("No se pudo conectar con MATE");
