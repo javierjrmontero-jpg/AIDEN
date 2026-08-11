@@ -26,3 +26,19 @@ frontend/.next/
 # OS
 .DS_Store
 Thumbs.db
+
+# Backups y temporales
+*.bak
+*.bak.*
+*.backup_*
+*.bak-*
+snapshot.json
+backup_containers_*.txt
+
+# Backups y temporales
+*.bak
+*.bak.*
+*.backup_*
+*.bak-*
+snapshot.json
+backup_containers_*.txt
