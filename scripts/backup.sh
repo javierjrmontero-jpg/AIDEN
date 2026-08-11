@@ -83,13 +83,23 @@ fi
 
 # ── 4. Home Assistant + Mosquitto ─────────────────────────────────────────────
 # Config de dispositivos y credenciales del broker MQTT.
-HA_FILE="$BACKUP_DIR/homeassistant_$DATE.tar.gz"
+#
+# HA y Mosquitto crean sus archivos como root dentro del contenedor, así que un
+# tar como jmontero falla justo en lo importante (.storage/auth, core.config,
+# mosquitto/config/passwd). Se hace desde un contenedor efímero, que sí los lee.
+# El .tar.gz queda como root pero con permisos de lectura: rclone puede subirlo
+# y la rotación puede borrarlo, porque el directorio es de jmontero.
+HA_NAME="homeassistant_$DATE.tar.gz"
 if [ -d /opt/home-assistant ]; then
-  if tar -czf "$HA_FILE" -C /opt/home-assistant ha-config mosquitto 2>/dev/null; then
-    echo "[$DATE] OK  home-assistant: $(du -sh "$HA_FILE" | cut -f1) → $(basename "$HA_FILE")"
+  if docker run --rm \
+       -v /opt/home-assistant:/src:ro \
+       -v "$BACKUP_DIR":/dst \
+       alpine:latest \
+       tar -czf "/dst/$HA_NAME" -C /src ha-config mosquitto 2>/dev/null; then
+    echo "[$DATE] OK  home-assistant: $(du -sh "$BACKUP_DIR/$HA_NAME" | cut -f1) → $HA_NAME"
   else
     echo "[$DATE] ERROR: fallo el backup de home-assistant"
-    rm -f "$HA_FILE"
+    rm -f "$BACKUP_DIR/$HA_NAME"
   fi
 else
   echo "[$DATE] AVISO: /opt/home-assistant no existe, se omite"
