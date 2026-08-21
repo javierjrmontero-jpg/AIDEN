@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.core.auth import get_current_user
 from app.models.user import User
 from app.models.document import Document
@@ -40,8 +40,30 @@ async def list_documents(
         for d in docs
     ]
 
+async def _process_document_bg(doc_id: str, user_id: str, filename: str, ext: str, content: bytes):
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Document).where(Document.id == doc_id))
+        doc = result.scalar_one_or_none()
+        if not doc:
+            return
+        try:
+            logger.info(f"[bg] Extrayendo texto de {filename} ({ext})")
+            text = extract_text(content, ext)
+            if not text.strip():
+                raise ValueError("El archivo no contiene texto extraíble")
+            chunk_count = index_document(user_id, doc_id, filename, text)
+            logger.info(f"[bg] Indexados {chunk_count} chunks para {filename}")
+            doc.chunk_count = chunk_count
+            doc.status = "ready"
+        except Exception as e:
+            logger.error(f"[bg] Error procesando {filename}: {e}", exc_info=True)
+            doc.status = "error"
+        await db.commit()
+
+
 @router.post("/documents")
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -67,28 +89,9 @@ async def upload_document(
     db.add(doc)
     await db.commit()
 
-    try:
-        logger.info(f"Extrayendo texto de {file.filename} ({ext})")
-        text = extract_text(content, ext)
-        logger.info(f"Texto extraído: {len(text)} caracteres")
+    background_tasks.add_task(_process_document_bg, doc_id, current_user.id, file.filename, ext, content)
 
-        if not text.strip():
-            raise ValueError("El archivo no contiene texto extraíble")
-
-        chunk_count = index_document(current_user.id, doc_id, file.filename, text)
-        logger.info(f"Indexados {chunk_count} chunks para {file.filename}")
-
-        doc.chunk_count = chunk_count
-        doc.status = "ready"
-        await db.commit()
-
-        return {"id": doc_id, "filename": file.filename, "chunks": chunk_count, "status": "ready"}
-
-    except Exception as e:
-        logger.error(f"Error procesando {file.filename}: {str(e)}", exc_info=True)
-        doc.status = "error"
-        await db.commit()
-        raise HTTPException(500, f"Error procesando el archivo: {str(e)}")
+    return {"id": doc_id, "filename": file.filename, "chunks": 0, "status": "processing"}
 
 @router.delete("/documents/{doc_id}")
 async def delete_document(

@@ -30,6 +30,14 @@ export default function Documents() {
     loadDocuments(t);
   }, [router]);
 
+  useEffect(() => {
+    if (!token) return;
+    const hasProcessing = documents.some((d) => d.status === "processing");
+    if (!hasProcessing) return;
+    const interval = setInterval(() => loadDocuments(token), 3000);
+    return () => clearInterval(interval);
+  }, [token, documents]);
+
   const loadDocuments = async (t: string) => {
     const res = await fetch(`${API_URL}/api/v1/documents`, {
       headers: { "Authorization": `Bearer ${t}` }
@@ -131,7 +139,7 @@ export default function Documents() {
             <p className="text-sm text-gray-400">
               {uploading ? "Procesando..." : "Clic para subir un documento"}
             </p>
-            <p className="text-xs text-gray-600 mt-1">PDF, TXT, DOCX, MD — máximo 10 MB</p>
+            <p className="text-xs text-gray-600 mt-1">PDF, TXT, DOCX, MD — máximo 50 MB</p>
             <input
               ref={fileRef}
               type="file"
