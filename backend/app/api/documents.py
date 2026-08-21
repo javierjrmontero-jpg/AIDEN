@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 ALLOWED_TYPES = {"pdf", "txt", "docx", "md"}
-MAX_SIZE = 10 * 1024 * 1024
+MAX_SIZE = 50 * 1024 * 1024
 
 @router.get("/documents")
 async def list_documents(
@@ -52,7 +52,7 @@ async def upload_document(
 
     content = await file.read()
     if len(content) > MAX_SIZE:
-        raise HTTPException(400, "Archivo demasiado grande. Máximo 10 MB")
+        raise HTTPException(400, "Archivo demasiado grande. Máximo 50 MB")
 
     doc_id = str(uuid.uuid4())
     doc = Document(
