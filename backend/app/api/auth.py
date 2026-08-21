@@ -63,6 +63,23 @@ async def _notify_n8n_registration(user_id: str, email: str, name: str) -> None:
     except Exception:
         pass  # no bloquear el registro si n8n no responde
 
+
+async def _notify_n8n_approval(email: str, name: str, approved: bool) -> None:
+    if not settings.N8N_APPROVAL_WEBHOOK:
+        return
+    payload = {
+        "event": "user_approved" if approved else "user_rejected",
+        "email": email,
+        "name": name,
+        "approved": approved,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(settings.N8N_APPROVAL_WEBHOOK, json=payload)
+    except Exception:
+        pass
+
+
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
@@ -152,20 +169,22 @@ async def approve_user(token: str, db: AsyncSession = Depends(get_db)):
     if not result:
         return HTMLResponse("<h2>Link inválido o expirado.</h2>", status_code=400)
     user_id, action = result
-    from sqlalchemy import select
+    from sqlalchemy import select, delete as sa_delete
     row = await db.execute(select(User).where(User.id == user_id))
     user = row.scalar_one_or_none()
     if not user:
-        return HTMLResponse("<h2>Usuario no encontrado.</h2>", status_code=404)
+        return HTMLResponse("<h2>Usuario no encontrado o ya procesado.</h2>", status_code=404)
     if action == "approve":
         user.is_active = True
         await db.commit()
+        await _notify_n8n_approval(user.email, user.name, approved=True)
         return HTMLResponse(f"<h2>✅ Usuario <b>{user.email}</b> aprobado. Ya puede ingresar a MATE.</h2>")
     else:
-        email = user.email
-        db.delete(user)
+        email, name = user.email, user.name
+        await db.execute(sa_delete(User).where(User.id == user_id))
         await db.commit()
-        return HTMLResponse(f"<h2>❌ Usuario <b>{email}</b> rechazado y eliminado.</h2>")
+        await _notify_n8n_approval(email, name, approved=False)
+        return HTMLResponse(f"<h2>❌ Usuario <b>{email}</b> rechazado. Puede volver a registrarse si fue un error.</h2>")
 
 
 @router.get("/auth/reject/{token}", response_class=HTMLResponse)
