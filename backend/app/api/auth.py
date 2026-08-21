@@ -84,14 +84,28 @@ def _validate_password(v: str) -> None:
         raise ValueError("La contraseña debe tener: " + ", ".join(errors))
 
 
+_ALLOWED_DOMAINS = {"gmail.com", "outlook.com", "molmont.com.ar"}
+_PASSWORD_DOMAINS = {"molmont.com.ar"}
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     name: str
-    password: str
+    password: str | None = None
 
-    @field_validator("password")
+    @field_validator("email")
     @classmethod
-    def password_strength(cls, v: str) -> str:
+    def validate_domain(cls, v: str) -> str:
+        domain = v.split("@")[-1].lower()
+        if domain not in _ALLOWED_DOMAINS:
+            raise ValueError(f"Solo se permiten cuentas de: {', '.join(sorted(_ALLOWED_DOMAINS))}")
+        return v
+
+    @field_validator("password", mode="before")
+    @classmethod
+    def password_strength(cls, v, info) -> str | None:
+        if v is None:
+            return v
         _validate_password(v)
         return v
 
@@ -115,11 +129,16 @@ class PasswordChangeRequest(BaseModel):
 @router.post("/auth/register")
 @limiter.limit("5/minute")
 async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    import uuid
+    domain = body.email.split("@")[-1].lower()
+    needs_password = domain in _PASSWORD_DOMAINS
+    if needs_password and not body.password:
+        raise HTTPException(status_code=400, detail="Las cuentas @molmont.com.ar requieren contraseña")
     existing = await get_user_by_email(db, body.email)
     if existing:
         raise HTTPException(status_code=400, detail="El email ya está registrado")
-    user = await create_user(db, body.email, body.name, body.password)
-    # Deshabilitar hasta que el admin apruebe
+    password = body.password if needs_password else f"OAUTH_{uuid.uuid4().hex}_Aa1!"
+    user = await create_user(db, body.email, body.name, password)
     user.is_active = False
     await db.commit()
     await db.refresh(user)

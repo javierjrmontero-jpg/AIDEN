@@ -17,6 +17,12 @@ function LoginContent() {
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState("");
 
+  const emailDomain = email.includes("@") ? email.split("@")[1]?.toLowerCase() : "";
+  const isMolmont = emailDomain === "molmont.com.ar";
+  const isOAuthDomain = emailDomain === "gmail.com" || emailDomain === "outlook.com";
+  const isAllowedDomain = isMolmont || isOAuthDomain;
+  const showPassword = mode === "register" ? isMolmont : true;
+
   // Handle Google OAuth callback: /login?token=...&name=...&email=...
   useEffect(() => {
     const token = searchParams.get("token");
@@ -50,9 +56,12 @@ function LoginContent() {
   }, [searchParams, router]);
 
   const handleSubmit = async () => {
-    if (!email || !password || (mode === "register" && !name)) {
-      setError("Completá todos los campos");
-      return;
+    if (mode === "register") {
+      if (!email || !name) { setError("Completá nombre y email"); return; }
+      if (!isAllowedDomain) { setError("Dominio no permitido. Solo @gmail.com, @outlook.com o @molmont.com.ar"); return; }
+      if (isMolmont && !password) { setError("Las cuentas @molmont.com.ar requieren contraseña"); return; }
+    } else {
+      if (!email || !password) { setError("Completá todos los campos"); return; }
     }
     setLoading(true);
     setError("");
@@ -247,20 +256,32 @@ function LoginContent() {
             )}
             <input
               type="email"
-              placeholder="Email"
+              placeholder="Email (@gmail.com, @outlook.com, @molmont.com.ar)"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               onKeyDown={handleKeyDown}
               className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition-colors placeholder-gray-500"
             />
-            <input
-              type="password"
-              placeholder="Contraseña"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition-colors placeholder-gray-500"
-            />
+            {showPassword && (
+              <input
+                type="password"
+                placeholder="Contraseña"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition-colors placeholder-gray-500"
+              />
+            )}
+            {mode === "register" && isOAuthDomain && (
+              <p className="text-xs text-gray-500 text-center">
+                Usarás el botón de {emailDomain === "gmail.com" ? "Google" : "Microsoft"} para ingresar una vez aprobado
+              </p>
+            )}
+            {mode === "register" && email.includes("@") && !isAllowedDomain && (
+              <p className="text-xs text-red-400 text-center">
+                Dominio no permitido. Solo @gmail.com, @outlook.com o @molmont.com.ar
+              </p>
+            )}
           </div>
 
           {error && (
