@@ -6,6 +6,7 @@ from app.core.auth import get_current_user
 from app.models.user import User
 from app.models.document import Document
 from app.services.rag.service import extract_text, index_document, delete_document_chunks
+import asyncio
 import uuid
 from datetime import datetime
 import logging
@@ -48,10 +49,10 @@ async def _process_document_bg(doc_id: str, user_id: str, filename: str, ext: st
             return
         try:
             logger.info(f"[bg] Extrayendo texto de {filename} ({ext})")
-            text = extract_text(content, ext)
+            text = await asyncio.to_thread(extract_text, content, ext)
             if not text.strip():
                 raise ValueError("El archivo no contiene texto extraíble")
-            chunk_count = index_document(user_id, doc_id, filename, text)
+            chunk_count = await asyncio.to_thread(index_document, user_id, doc_id, filename, text)
             logger.info(f"[bg] Indexados {chunk_count} chunks para {filename}")
             doc.chunk_count = chunk_count
             doc.status = "ready"
