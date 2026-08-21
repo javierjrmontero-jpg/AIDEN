@@ -143,9 +143,10 @@ async def approve_user(token: str, db: AsyncSession = Depends(get_db)):
         await db.commit()
         return HTMLResponse(f"<h2>✅ Usuario <b>{user.email}</b> aprobado. Ya puede ingresar a MATE.</h2>")
     else:
-        await db.delete(user)
+        email = user.email
+        db.delete(user)
         await db.commit()
-        return HTMLResponse(f"<h2>❌ Usuario <b>{user.email}</b> rechazado y eliminado.</h2>")
+        return HTMLResponse(f"<h2>❌ Usuario <b>{email}</b> rechazado y eliminado.</h2>")
 
 
 @router.get("/auth/reject/{token}", response_class=HTMLResponse)
