@@ -70,7 +70,7 @@ function LoginContent() {
       const endpoint = mode === "login" ? "/api/v1/auth/login" : "/api/v1/auth/register";
       const body = mode === "login"
         ? { email, password }
-        : { email, name, password };
+        : { email, name, ...(isMolmont && password ? { password } : {}) };
 
       const res = await fetch(`${API_URL}${endpoint}`, {
         method: "POST",
@@ -81,7 +81,8 @@ function LoginContent() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.detail || (mode === "login" ? "Email o contraseña incorrectos" : "Error al registrarse"));
+        const detail = data.detail;
+        setError(Array.isArray(detail) ? (detail[0]?.msg || "Error de validación") : (detail || (mode === "login" ? "Email o contraseña incorrectos" : "Error al registrarse")));
         return;
       }
 
