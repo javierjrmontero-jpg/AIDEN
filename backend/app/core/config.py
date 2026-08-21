@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     N8N_API_KEY: str = ""
     WEBHOOK_SECRET: str = ""
     OAUTH_ADMIN_EMAIL: str = "javierjrmontero@outlook.com"
+    N8N_REGISTRATION_WEBHOOK: str = ""
+    APPROVAL_TOKEN_TTL: int = 172800  # 48 horas
 
     @field_validator("SECRET_KEY")
     @classmethod

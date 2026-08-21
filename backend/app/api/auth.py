@@ -1,14 +1,67 @@
+import hashlib
+import hmac
+import time
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, EmailStr, field_validator
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.user import User
 from app.services.auth.service import (
     get_user_by_email, create_user, verify_password, create_token
 )
+
+_MATE_BASE = "https://mate.molmont.com.ar"
+
+
+def _make_approval_token(user_id: str, action: str) -> str:
+    ts = str(int(time.time()))
+    msg = f"{user_id}:{action}:{ts}"
+    sig = hmac.new(settings.SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
+    return f"{msg}:{sig}"
+
+
+def _verify_approval_token(token: str) -> tuple[str, str] | None:
+    """Returns (user_id, action) or None if invalid/expired."""
+    try:
+        user_id, action, ts, sig = token.rsplit(":", 3)
+        msg = f"{user_id}:{action}:{ts}"
+        expected = hmac.new(settings.SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return None
+        if time.time() - int(ts) > settings.APPROVAL_TOKEN_TTL:
+            return None
+        if action not in ("approve", "reject"):
+            return None
+        return user_id, action
+    except Exception:
+        return None
+
+
+async def _notify_n8n_registration(user_id: str, email: str, name: str) -> None:
+    if not settings.N8N_REGISTRATION_WEBHOOK:
+        return
+    approve_token = _make_approval_token(user_id, "approve")
+    reject_token = _make_approval_token(user_id, "reject")
+    payload = {
+        "event": "user_registration",
+        "user_id": user_id,
+        "email": email,
+        "name": name,
+        "approve_url": f"{_MATE_BASE}/api/v1/auth/approve/{approve_token}",
+        "reject_url": f"{_MATE_BASE}/api/v1/auth/reject/{reject_token}",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(settings.N8N_REGISTRATION_WEBHOOK, json=payload)
+    except Exception:
+        pass  # no bloquear el registro si n8n no responde
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -66,8 +119,38 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
     if existing:
         raise HTTPException(status_code=400, detail="El email ya está registrado")
     user = await create_user(db, body.email, body.name, body.password)
-    token = create_token(user.id, user.email)
-    return {"token": token, "name": user.name, "email": user.email}
+    # Deshabilitar hasta que el admin apruebe
+    user.is_active = False
+    await db.commit()
+    await db.refresh(user)
+    await _notify_n8n_registration(user.id, user.email, user.name)
+    return {"pending": True, "message": "Registro exitoso. Tu cuenta será revisada por el administrador."}
+
+
+@router.get("/auth/approve/{token}", response_class=HTMLResponse)
+async def approve_user(token: str, db: AsyncSession = Depends(get_db)):
+    result = _verify_approval_token(token)
+    if not result:
+        return HTMLResponse("<h2>Link inválido o expirado.</h2>", status_code=400)
+    user_id, action = result
+    from sqlalchemy import select
+    row = await db.execute(select(User).where(User.id == user_id))
+    user = row.scalar_one_or_none()
+    if not user:
+        return HTMLResponse("<h2>Usuario no encontrado.</h2>", status_code=404)
+    if action == "approve":
+        user.is_active = True
+        await db.commit()
+        return HTMLResponse(f"<h2>✅ Usuario <b>{user.email}</b> aprobado. Ya puede ingresar a MATE.</h2>")
+    else:
+        await db.delete(user)
+        await db.commit()
+        return HTMLResponse(f"<h2>❌ Usuario <b>{user.email}</b> rechazado y eliminado.</h2>")
+
+
+@router.get("/auth/reject/{token}", response_class=HTMLResponse)
+async def reject_user(token: str, db: AsyncSession = Depends(get_db)):
+    return await approve_user(token, db)
 
 
 @router.post("/auth/login")
@@ -76,6 +159,8 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
     user = await get_user_by_email(db, body.email)
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Email o contraseña incorrectos")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Tu cuenta está pendiente de aprobación por el administrador")
     if user.totp_enabled:
         from app.api.mfa import make_mfa_token
         return {"mfa_required": True, "mfa_token": make_mfa_token(user.id)}

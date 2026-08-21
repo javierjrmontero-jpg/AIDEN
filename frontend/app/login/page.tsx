@@ -72,7 +72,13 @@ function LoginContent() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.detail || "Error al autenticar");
+        setError(data.detail || (mode === "login" ? "Email o contraseña incorrectos" : "Error al registrarse"));
+        return;
+      }
+
+      if (data.pending) {
+        setError("Registro exitoso. Tu cuenta será revisada por el administrador antes de poder ingresar.");
+        setMode("login");
         return;
       }
 
