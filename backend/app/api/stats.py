@@ -126,3 +126,45 @@ async def get_personal_stats(
         "most_active_day": most_active,
         "member_since": current_user.created_at.strftime("%d/%m/%Y")
     }
+
+
+@router.get("/stats/vault")
+async def get_vault_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Contadores de la bóveda. Liviano a propósito: el HUD lo consulta cada pocos segundos."""
+    docs = await db.scalar(
+        select(func.count(Document.id))
+        .where(Document.user_id == current_user.id)
+    ) or 0
+
+    chunks = await db.scalar(
+        select(func.coalesce(func.sum(Document.chunk_count), 0))
+        .where(Document.user_id == current_user.id)
+    ) or 0
+
+    memories = await db.scalar(
+        select(func.count(Memory.id))
+        .where(Memory.user_id == current_user.id)
+    ) or 0
+
+    result = await db.execute(
+        select(Document)
+        .where(Document.user_id == current_user.id)
+        .where(Document.status == "processing")
+        .order_by(Document.created_at.desc())
+        .limit(1)
+    )
+    pending = result.scalar_one_or_none()
+
+    return {
+        "documents": docs,
+        "chunks": int(chunks),
+        "memories": memories,
+        "processing": {
+            "filename": pending.filename,
+            "size_bytes": pending.size_bytes,
+            "started_at": pending.created_at.isoformat(),
+        } if pending else None,
+    }

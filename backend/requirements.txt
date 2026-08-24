@@ -30,3 +30,7 @@ pyotp>=2.9.0
 # Graphiti — grafo de memoria temporal
 graphiti-core==0.3.19
 neo4j==5.28.4
+
+# Vitales del sistema para el HUD
+psutil==6.1.0
+
