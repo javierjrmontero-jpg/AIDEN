@@ -39,6 +39,22 @@ CHAT_TOOL_NAMES = {
 }
 CHAT_TOOLS = [t for t in RESEARCH_TOOLS if t["name"] in CHAT_TOOL_NAMES]
 
+
+def _api_error_message(e: anthropic.APIError) -> str:
+    """Mensaje legible para el usuario a partir de un error de la API."""
+    detalle = str(getattr(e, "message", "") or e)
+    if "credit balance is too low" in detalle:
+        return ("⚠️ **Sin saldo en la cuenta de Anthropic.** Recargá créditos en "
+                "console.anthropic.com → Plans & Billing para volver a usar el chat.")
+    if isinstance(e, anthropic.RateLimitError):
+        return "⚠️ **Límite de uso alcanzado.** Esperá unos minutos y volvé a intentar."
+    if isinstance(e, anthropic.AuthenticationError):
+        return "⚠️ **API key inválida.** Revisá `ANTHROPIC_API_KEY` en la configuración del servidor."
+    if "prompt is too long" in detalle:
+        return ("⚠️ **La conversación superó el contexto del modelo.** "
+                "Empezá una conversación nueva para continuar.")
+    return f"⚠️ **Error de la API de Anthropic:** {detalle}"
+
 # Tope de iteraciones del bucle de herramientas por turno de chat (anti-loop).
 MAX_TOOL_TURNS = 5
 # -----------------------------------------------------------------------------
@@ -268,18 +284,25 @@ async def stream_chat(messages: list, user=None, db=None, voice: bool = False):
     convo = [{"role": m.role, "content": m.content} for m in messages]
 
     for _turn in range(MAX_TOOL_TURNS):
-        with client.messages.stream(
-            model="claude-sonnet-4-5",
-            max_tokens=2048,
-            system=system,
-            tools=CHAT_TOOLS,
-            messages=convo,
-        ) as stream:
-            # Streamea al cliente cualquier texto que el modelo emita en esta pasada
-            for text in stream.text_stream:
-                payload = json.dumps(text, ensure_ascii=False)
-                yield f"data: {payload}\n\n"
-            final = stream.get_final_message()
+        try:
+            with client.messages.stream(
+                model="claude-sonnet-4-5",
+                max_tokens=2048,
+                system=system,
+                tools=CHAT_TOOLS,
+                messages=convo,
+            ) as stream:
+                # Streamea al cliente cualquier texto que el modelo emita en esta pasada
+                for text in stream.text_stream:
+                    payload = json.dumps(text, ensure_ascii=False)
+                    yield f"data: {payload}\n\n"
+                final = stream.get_final_message()
+        except anthropic.APIError as e:
+            logger.error(f"Error de la API de Anthropic en chat: {e}")
+            aviso = _api_error_message(e)
+            yield f"data: {json.dumps(aviso, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
         # Guarda el turno completo del asistente (texto + bloques tool_use)
         convo.append({"role": "assistant", "content": final.content})
