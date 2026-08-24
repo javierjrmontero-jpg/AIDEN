@@ -1,6 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.auth import get_current_user
 from app.models.user import User
@@ -42,23 +42,26 @@ async def list_documents(
     ]
 
 async def _process_document_bg(doc_id: str, user_id: str, filename: str, ext: str, content: bytes):
+    # El trabajo pesado va fuera de cualquier sesión de DB: SQLite bloquea el
+    # archivo mientras haya una transacción abierta y el OCR tarda minutos.
+    try:
+        logger.info(f"[bg] Extrayendo texto de {filename} ({ext})")
+        text = await asyncio.to_thread(extract_text, content, ext)
+        if not text.strip():
+            raise ValueError("El archivo no contiene texto extraíble")
+        chunk_count = await asyncio.to_thread(index_document, user_id, doc_id, filename, text)
+        logger.info(f"[bg] Indexados {chunk_count} chunks para {filename}")
+        status = "ready"
+    except Exception as e:
+        logger.error(f"[bg] Error procesando {filename}: {e}", exc_info=True)
+        chunk_count, status = 0, "error"
+
     async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Document).where(Document.id == doc_id))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            return
-        try:
-            logger.info(f"[bg] Extrayendo texto de {filename} ({ext})")
-            text = await asyncio.to_thread(extract_text, content, ext)
-            if not text.strip():
-                raise ValueError("El archivo no contiene texto extraíble")
-            chunk_count = await asyncio.to_thread(index_document, user_id, doc_id, filename, text)
-            logger.info(f"[bg] Indexados {chunk_count} chunks para {filename}")
-            doc.chunk_count = chunk_count
-            doc.status = "ready"
-        except Exception as e:
-            logger.error(f"[bg] Error procesando {filename}: {e}", exc_info=True)
-            doc.status = "error"
+        await db.execute(
+            update(Document)
+            .where(Document.id == doc_id)
+            .values(chunk_count=chunk_count, status=status)
+        )
         await db.commit()
 
 
