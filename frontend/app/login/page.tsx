@@ -5,6 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 const API_URL = "";
 
+// Pantalla a la que se entra tras autenticar
+const HOME = "/hud";
+
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -51,7 +54,7 @@ function LoginContent() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
       }).catch(() => {});
-      router.replace("/");
+      router.replace(HOME);
     }
   }, [searchParams, router]);
 
@@ -103,7 +106,7 @@ function LoginContent() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: data.token }),
       }).catch(() => {});
-      router.replace("/");
+      router.replace(HOME);
 
     } catch {
       setError("No se pudo conectar con MATE");
@@ -140,7 +143,7 @@ function LoginContent() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: data.token }),
       }).catch(() => {});
-      router.replace("/");
+      router.replace(HOME);
     } catch {
       setError("No se pudo conectar con MATE");
     } finally {

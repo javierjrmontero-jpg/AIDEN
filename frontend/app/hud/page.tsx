@@ -162,6 +162,11 @@ export default function Hud() {
   const hablo = useRef(false);
   const ultimoSonido = useRef(0);
   const inicioGrab = useRef(0);
+  const [said, setSaid] = useState("");
+  const [reply, setReply] = useState("");
+  const [asking, setAsking] = useState(false);
+  const hudConv = useRef<string | null>(null);
+
   const UMBRAL_VOZ = 0.08;      // pico normalizado por encima del ruido de sala
   const SILENCIO_MS = 1500;     // silencio que da por terminada la frase
   const MAX_GRAB_MS = 20000;    // tope duro por si nunca detecta silencio
@@ -427,8 +432,7 @@ export default function Hud() {
         push("ok", `Ejecutando: ${mando.name}`);
         mando.run();
       } else {
-        push("net", "Sin mando asociado — se lo paso a MATE");
-        router.push(`/?q=${encodeURIComponent(dicho)}`);
+        await preguntarAMate(dicho);
       }
     } catch {
       push("err", "No se pudo transcribir el audio");
@@ -491,32 +495,113 @@ export default function Hud() {
     return () => cancelAnimationFrame(raf);
   }, [micOn]);
 
+  /* ── Consulta hablada: se resuelve acá, no en el chat ───────────────
+     La consola mantiene su propia conversación, así hablar no te saca de
+     la pantalla. La respuesta se lee en voz alta por el canal de salida. */
+  const preguntarAMate = async (pregunta: string) => {
+    setAsking(true);
+    setSaid(pregunta);
+    setReply("");
+    push("net", "Consultando a MATE…");
+
+    try {
+      const res = await fetch(`${API_URL}/api/v1/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: pregunta }],
+          conversation_id: hudConv.current,
+          voice: true,
+        }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completo = "";
+
+      while (reader) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lineas = buffer.split("\n");
+        buffer = lineas.pop() || "";
+
+        for (const linea of lineas) {
+          if (!linea.startsWith("data: ")) continue;
+          const bruto = linea.slice(6).trim();
+          if (bruto === "[DONE]") continue;
+
+          let texto: string;
+          try { texto = JSON.parse(bruto); } catch { texto = bruto; }
+          if (typeof texto !== "string") continue;
+
+          // La consola reutiliza su propia conversación entre preguntas
+          if (texto.startsWith("[CONV:")) { hudConv.current = texto.slice(6, -1); continue; }
+          if (texto.startsWith("[STATUS:tool:")) {
+            push("net", `Herramienta: ${texto.replace("[STATUS:tool:", "").replace("]", "").trim()}`);
+            continue;
+          }
+          if (texto.startsWith("[STATUS:") || texto.startsWith("[CONFIRM_EMAIL:")) continue;
+
+          completo += texto;
+          setReply(completo);
+        }
+      }
+
+      if (completo.trim()) {
+        push("ok", "Respuesta recibida");
+        hablar(completo);
+      } else {
+        push("warn", "MATE no devolvió texto");
+      }
+    } catch {
+      push("err", "No se pudo consultar a MATE");
+      setReply("No se pudo consultar a MATE.");
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  /* ── Voz de salida ──────────────────────────────────────────────────
+     speechSynthesis no expone su audio a Web Audio, así que el medidor
+     refleja actividad: cada palabra pronunciada lo hace latir. */
+  const hablar = (texto: string) => {
+    if (!window.speechSynthesis) { push("warn", "Este navegador no tiene síntesis de voz"); return; }
+
+    const limpio = texto
+      .replace(/```[\s\S]*?```/g, " (bloque de código) ")
+      .replace(/[*_#`>]/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!limpio) return;
+
+    const u = new SpeechSynthesisUtterance(limpio);
+    u.lang = "es-AR";
+    const voz = window.speechSynthesis.getVoices().find((v) => v.lang.startsWith("es"));
+    if (voz) { u.voice = voz; setVoiceName(voz.name); }
+
+    u.onstart = () => setSpeaking(true);
+    u.onboundary = () => {
+      setOutLevel(0.35 + Math.random() * 0.5);
+      setTimeout(() => setOutLevel((l) => l * 0.4), 120);
+    };
+    u.onend = () => { setSpeaking(false); setOutLevel(0); };
+    u.onerror = () => { setSpeaking(false); setOutLevel(0); push("err", "Falló la síntesis de voz"); };
+
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  };
+
   /* ── Prueba de salida ───────────────────────────────────────────────
      speechSynthesis no expone su audio a Web Audio, así que no hay
      amplitud real que medir. El medidor refleja actividad: cada palabra
      pronunciada dispara un evento `boundary` que lo hace latir. */
   const testOutput = () => {
-    if (!window.speechSynthesis) {
-      push("err", "Este navegador no tiene síntesis de voz");
-      return;
-    }
-    const u = new SpeechSynthesisUtterance(
-      "Consola MATE. Canal de salida verificado. Todos los sistemas responden."
-    );
-    u.lang = "es-AR";
-    const voz = window.speechSynthesis.getVoices().find((v) => v.lang.startsWith("es"));
-    if (voz) { u.voice = voz; setVoiceName(voz.name); }
-
-    u.onstart = () => { setSpeaking(true); push("ok", "Probando canal de salida"); };
-    u.onboundary = () => {
-      setOutLevel(0.35 + Math.random() * 0.5);
-      setTimeout(() => setOutLevel((l) => l * 0.4), 120);
-    };
-    u.onend = () => { setSpeaking(false); setOutLevel(0); push("ok", "Canal de salida verificado"); };
-    u.onerror = () => { setSpeaking(false); setOutLevel(0); push("err", "Falló la síntesis de voz"); };
-
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
+    push("ok", "Probando canal de salida");
+    hablar("Consola MATE. Canal de salida verificado. Todos los sistemas responden.");
   };
 
   /* Al salir de la consola hay que soltar el micrófono, o el navegador
@@ -624,7 +709,7 @@ export default function Hud() {
             <span style={S.markS}>Consola de mando</span>
           </div>
           <div style={{ flex: 1 }} />
-          <button onClick={() => router.push("/")} style={S.back}>← Volver</button>
+          <button onClick={() => router.push("/")} style={S.back}>Ir al chat →</button>
           <div style={S.clockWrap}>
             <div style={S.clock}>{pad(now.getHours())}:{pad(now.getMinutes())}:{pad(now.getSeconds())}</div>
             <div style={S.clockSub}>{DIAS[now.getDay()]} {now.getDate()} {MESES[now.getMonth()]}</div>
@@ -832,6 +917,25 @@ export default function Hud() {
                 </div>
               </div>
             </div>
+
+            {(said || reply || asking) && (
+              <div style={S.exchange}>
+                {said && (
+                  <p style={S.said}>
+                    <span style={S.who}>Vos</span>{said}
+                  </p>
+                )}
+                <p style={S.reply}>
+                  <span style={{ ...S.who, color: "#3FBFB0" }}>MATE</span>
+                  {reply || (asking ? "pensando…" : "")}
+                  {reply && !speaking && !asking && (
+                    <button onClick={() => hablar(reply)} style={{ ...S.micBtn, marginLeft: 10 }}>
+                      Repetir
+                    </button>
+                  )}
+                </p>
+              </div>
+            )}
           </div>
         </section>
 
@@ -984,5 +1088,15 @@ const S: Record<string, CSSProperties> = {
     display: "flex", alignItems: "center", gap: 22, padding: "7px 14px", background: "#0F151C",
     border: "1px solid #1D2833", fontFamily: MONO, fontSize: 11, letterSpacing: ".04em", color: "#45545F", flexWrap: "wrap",
   },
+  exchange: {
+    marginTop: 12, paddingTop: 12, borderTop: "1px solid #1D2833",
+    display: "grid", gap: 6, maxHeight: 130, overflow: "auto",
+  },
+  who: {
+    fontSize: 10, letterSpacing: ".16em", textTransform: "uppercase",
+    color: "#45545F", marginRight: 10,
+  },
+  said: { margin: 0, fontSize: 13, color: "#6E8090" },
+  reply: { margin: 0, fontSize: 14, color: "#C6D3DE", lineHeight: 1.5 },
   statusB: { color: "#6E8090", fontWeight: 400 },
 };
