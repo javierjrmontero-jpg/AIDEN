@@ -153,6 +153,9 @@ export default function Hud() {
   const logId = useRef(0);
   const analyser = useRef<AnalyserNode | null>(null);
   const audioCtx = useRef<AudioContext | null>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const stream = useRef<MediaStream | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
   const [inLevel, setInLevel] = useState(0);
   const [outLevel, setOutLevel] = useState(0);
   const [speaking, setSpeaking] = useState(false);
@@ -327,32 +330,87 @@ export default function Hud() {
     cx.stroke();
   }, [vitals]);
 
-  /* ── Audio real por micrófono ───────────────────────────────────── */
+  /* ── Micrófono: mide nivel y además graba para transcribir ───────── */
+  const cerrarMic = useCallback(() => {
+    stream.current?.getTracks().forEach((t) => t.stop());
+    stream.current = null;
+    audioCtx.current?.close();
+    audioCtx.current = null;
+    analyser.current = null;
+    recorder.current = null;
+    setMicOn(false);
+    setInLevel(0);
+  }, []);
+
   const toggleMic = async () => {
+    if (transcribing) return;
     if (micOn) {
-      audioCtx.current?.close();
-      audioCtx.current = null;
-      analyser.current = null;
+      // Detener cierra el grabador; su onstop dispara la transcripción.
+      recorder.current?.stop();
       setMicOn(false);
-      setInLevel(0);
-      push("ok", "Entrada de audio cerrada");
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
       const ctx = new AudioContext();
-      const src = ctx.createMediaStreamSource(stream);
       const an = ctx.createAnalyser();
       an.fftSize = 512;
-      src.connect(an);
+      ctx.createMediaStreamSource(s).connect(an);
+
+      const chunks: Blob[] = [];
+      const mr = new MediaRecorder(s);
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      mr.onstop = async () => {
+        cerrarMic();
+        await procesarVoz(new Blob(chunks, { type: "audio/webm" }));
+      };
+      mr.start();
+
+      stream.current = s;
       audioCtx.current = ctx;
       analyser.current = an;
+      recorder.current = mr;
       setMicOn(true);
       setMicError("");
-      push("ok", `Entrada de audio abierta — ${ctx.sampleRate / 1000} kHz`);
+      push("ok", "Escuchando — volvé a tocar para enviar");
     } catch {
       setMicError("Sin permiso de micrófono");
       push("err", "El navegador denegó el acceso al micrófono");
+    }
+  };
+
+  /* ── De voz a acción ─────────────────────────────────────────────── */
+  const procesarVoz = async (blob: Blob) => {
+    setTranscribing(true);
+    push("net", "Transcribiendo…");
+    try {
+      const fd = new FormData();
+      fd.append("file", blob, "audio.webm");
+      fd.append("language", "es-AR");
+      const res = await fetch(`${API_URL}/api/v1/transcribe`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const { text } = await res.json();
+      const dicho = (text || "").trim();
+      if (!dicho) { push("warn", "No se entendió nada"); return; }
+
+      push("ok", `«${dicho}»`);
+
+      const mando = reconocerMando(dicho);
+      if (mando) {
+        push("ok", `Ejecutando: ${mando.name}`);
+        mando.run();
+      } else {
+        push("net", "Sin mando asociado — se lo paso a MATE");
+        router.push(`/?q=${encodeURIComponent(dicho)}`);
+      }
+    } catch {
+      push("err", "No se pudo transcribir el audio");
+    } finally {
+      setTranscribing(false);
     }
   };
 
@@ -424,6 +482,10 @@ export default function Hud() {
     window.speechSynthesis.speak(u);
   };
 
+  /* Al salir de la consola hay que soltar el micrófono, o el navegador
+     sigue mostrando la pestaña como grabando. */
+  useEffect(() => cerrarMic, [cerrarMic]);
+
   /* ── Auto-scroll del registro ───────────────────────────────────── */
   useEffect(() => {
     const el = feedRef.current;
@@ -451,6 +513,28 @@ export default function Hud() {
     { id: "sync", name: "Agenda", key: "CTRL + S", run: () => router.push("/calendar") },
     { id: "tasks", name: "Tareas", key: "CTRL + T", run: () => router.push("/tasks") },
   ];
+
+  /* Palabras que disparan un mando de la consola. Todo lo demás va al chat,
+     que es donde MATE razona: acá solo resolvemos lo que la consola hace. */
+  const VOZ: Record<string, string[]> = {
+    chat: ["nueva conversación", "nuevo chat", "conversación nueva"],
+    ingest: ["documento", "documentos", "subir", "ingerir", "bóveda"],
+    agent: ["agente", "autónomo"],
+    brief: ["briefing", "resumen del día", "parte del día"],
+    sync: ["agenda", "calendario"],
+    tasks: ["tarea", "tareas", "pendientes"],
+  };
+
+  const reconocerMando = (dicho: string) => {
+    const t = dicho.toLowerCase();
+    // Solo tratamos como mando las frases cortas: "abrí tareas" sí,
+    // "¿qué tareas tengo para el jueves?" es una pregunta para MATE.
+    if (t.split(/\s+/).length > 5) return null;
+    for (const [id, claves] of Object.entries(VOZ)) {
+      if (claves.some((k) => t.includes(k))) return commands.find((c) => c.id === id) ?? null;
+    }
+    return null;
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -675,19 +759,24 @@ export default function Hud() {
         <section style={S.panel}>
           <h2 style={S.h2}>
             Entrada / salida de audio
-            <span style={S.tag}>{micError || (micOn ? "captando" : "en reposo")}</span>
+            <span style={S.tag}>
+              {micError || (transcribing ? "transcribiendo" : micOn ? "escuchando" : "en reposo")}
+            </span>
           </h2>
           <div className="hud-body" style={S.body}>
             <div className="hud-audio">
               <div style={{ display: "grid", gap: 7 }}>
                 <div style={S.chanHd}>
                   Entrada
-                  <button onClick={toggleMic} style={S.micBtn}>
-                    {micOn ? "Cerrar micrófono" : "Abrir micrófono"}
+                  <button onClick={toggleMic} disabled={transcribing} style={S.micBtn}>
+                    {transcribing ? "Transcribiendo…" : micOn ? "Enviar" : "Hablar"}
                   </button>
                 </div>
                 <Vu level={inLevel} />
-                <div style={S.db}><span>-60</span><span>-24</span><span>-12</span><span>-6</span><span>0 dB</span></div>
+                <div style={S.db}>
+                  <span>«tareas», «agenda», «documento» abren la pantalla</span>
+                  <span>lo demás va al chat</span>
+                </div>
               </div>
 
               <canvas ref={waveCanvas} style={{ display: "block", width: "100%", height: 56 }} />

@@ -133,13 +133,17 @@ useEffect(() => {
     if (token) loadConversations();
   }, [token, loadConversations]);
 
-  // Deep link desde el HUD: /?c=<id> abre esa conversación y limpia la URL
+  // Deep links desde el HUD: /?c=<id> abre una conversación, /?q=<texto>
+  // envía una consulta (la usa el mando de voz de la consola).
   useEffect(() => {
     if (!token) return;
-    const id = new URLSearchParams(window.location.search).get("c");
-    if (!id) return;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("c");
+    const q = params.get("q");
+    if (!id && !q) return;
     window.history.replaceState({}, "", "/");
-    loadConversation(id);
+    if (id) loadConversation(id);
+    else if (q) sendMessage(q);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -296,9 +300,11 @@ useEffect(() => {
     } catch (e) { console.error(e); }
   };
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading || !token) return;
-    const userMessage: Message = { role: "user", content: input };
+  // `texto` permite enviar sin pasar por el input: lo usa el deep link /?q=
+  const sendMessage = async (texto?: string) => {
+    const contenido = (texto ?? input).trim();
+    if (!contenido || loading || !token) return;
+    const userMessage: Message = { role: "user", content: contenido };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInput("");
@@ -732,7 +738,7 @@ if (ttsEnabled) {
                 </svg>
               )}
             </button>
-            <button onClick={sendMessage} disabled={loading || !input.trim()}
+            <button onClick={() => sendMessage()} disabled={loading || !input.trim()}
               className="px-5 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-xl text-sm font-medium transition-colors flex-shrink-0">
               {loading ? "..." : "Enviar"}
             </button>
