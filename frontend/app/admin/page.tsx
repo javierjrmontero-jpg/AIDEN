@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useGoBack } from "@/components/useGoBack";
 
 export default function Admin() {
   const router = useRouter();
+  const goBack = useGoBack();
   const [token, setToken] = useState<string | null>(null);
   const [stats, setStats] = useState<any>(null);
   const [searchUsage, setSearchUsage] = useState<any>(null);
@@ -52,7 +54,7 @@ setBackups(await b.json());
     <div className="min-h-screen bg-gray-950 text-gray-100 px-4 py-8">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center gap-3 mb-8">
-          <button onClick={() => router.push("/")} className="text-gray-500 hover:text-gray-300">← Volver</button>
+          <button onClick={() => goBack()} className="text-gray-500 hover:text-gray-300">← Volver</button>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-400" />
             <span className="font-semibold">MATE</span>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useGoBack } from "@/components/useGoBack";
 
 interface CalEvent {
   id: string;
@@ -39,6 +40,7 @@ function fmt(iso: string, allDay?: boolean) {
 
 export default function Calendar() {
   const router = useRouter();
+  const goBack = useGoBack();
   const [token, setToken] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<CalAccount[]>([]);
   const [events, setEvents] = useState<CalEvent[]>([]);
@@ -174,7 +176,7 @@ export default function Calendar() {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center gap-3 mb-8">
           <button
-            onClick={() => router.push("/")}
+            onClick={() => goBack()}
             className="p-2 rounded-lg hover:bg-gray-800 text-gray-500 hover:text-gray-300 transition-colors"
           >
             ←

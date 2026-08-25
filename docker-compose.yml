@@ -33,6 +33,7 @@ services:
       - ./scripts:/scripts
       - /home/jmontero/mate_backups:/backups
       - /var/run/docker.sock:/var/run/docker.sock
+      - /:/hostfs:ro   # Solo lectura: la consola reporta el disco real del host
     env_file:
       - .env
     depends_on:

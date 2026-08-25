@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useGoBack } from "@/components/useGoBack";
 
 export default function Memories() {
   const router = useRouter();
+  const goBack = useGoBack();
   const [token, setToken] = useState<string | null>(null);
   const [memories, setMemories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,7 +66,7 @@ export default function Memories() {
 
         <div className="flex items-center gap-3 mb-8">
           <button
-            onClick={() => router.push("/")}
+            onClick={() => goBack()}
             className="text-gray-500 hover:text-gray-300 transition-colors"
           >
             ← Volver

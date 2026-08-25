@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useGoBack } from "@/components/useGoBack";
 
 const API_URL = "";
 
@@ -17,6 +18,7 @@ interface Document {
 
 export default function Documents() {
   const router = useRouter();
+  const goBack = useGoBack();
   const [token, setToken] = useState<string | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -112,7 +114,7 @@ export default function Documents() {
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
           <button
-            onClick={() => router.push("/")}
+            onClick={() => goBack()}
             className="text-gray-500 hover:text-gray-300 transition-colors"
           >
             ← Volver

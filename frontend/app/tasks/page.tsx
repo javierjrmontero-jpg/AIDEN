@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useGoBack } from "@/components/useGoBack";
 
 interface Task {
   id: string;
@@ -15,6 +16,7 @@ interface Task {
 
 export default function Tasks() {
   const router = useRouter();
+  const goBack = useGoBack();
   const [token, setToken] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,7 +103,7 @@ export default function Tasks() {
       <div className="max-w-2xl mx-auto">
 
         <div className="flex items-center gap-3 mb-8">
-          <button onClick={() => router.push("/")}
+          <button onClick={() => goBack()}
             className="p-2 rounded-lg hover:bg-gray-800 text-gray-500 hover:text-gray-300 transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6"/>

@@ -22,6 +22,7 @@ interface Vitals {
   processes: number;
   net_rx_mbps: number;
   net_tx_mbps: number;
+  disk_scope?: string;
 }
 
 interface Vault {
@@ -84,6 +85,44 @@ const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "o
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/* La maquetación vive acá y no en los objetos inline: las media queries no
+   existen en `style`, y sin ellas la consola no se adapta a pantallas chicas. */
+const HUD_CSS = `
+.hud-root  { height:100vh; display:grid; grid-template-rows:auto 1fr auto auto; gap:10px; padding:10px; }
+.hud-grid  { display:grid; grid-template-columns:300px minmax(0,1fr) 330px; gap:10px; min-height:0; }
+.hud-col   { display:grid; gap:10px; min-height:0; }
+.hud-col-l { grid-template-rows:auto 1fr; }
+.hud-col-m { grid-template-rows:auto 1fr; }
+.hud-col-r { grid-template-rows:1fr 1fr; }
+.hud-mid   { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; min-height:0; }
+.hud-audio { display:grid; grid-template-columns:1fr 210px 1fr; gap:18px; align-items:center; }
+.hud-mandos{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+
+.hud-root button:focus-visible { outline:2px solid #3FBFB0; outline-offset:1px; }
+.hud-root ::-webkit-scrollbar { width:8px; height:8px; }
+.hud-root ::-webkit-scrollbar-thumb { background:#2A3946; }
+.hud-root ::-webkit-scrollbar-track { background:transparent; }
+
+@media (max-width:1180px) {
+  .hud-root  { height:auto; }
+  .hud-grid  { grid-template-columns:1fr; }
+  .hud-col-l, .hud-col-m, .hud-col-r { grid-template-rows:auto; }
+  .hud-mid   { grid-template-columns:1fr; }
+  .hud-audio { grid-template-columns:1fr; gap:14px; }
+  .hud-col > section, .hud-mid > section { min-height:240px; }
+  .hud-body  { overflow:visible !important; }
+}
+@media (max-width:640px) {
+  .hud-mandos { grid-template-columns:1fr 1fr; }
+  .hud-rail   { flex-wrap:wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-root *, .hud-root *::before, .hud-root *::after {
+    transition-duration:.001ms !important; animation-duration:.001ms !important;
+  }
+}
+`;
+
 function relTime(then: Date, now: Date): string {
   const s = Math.max(0, Math.floor((now.getTime() - then.getTime()) / 1000));
   if (s < 60) return "hace instantes";
@@ -115,6 +154,9 @@ export default function Hud() {
   const analyser = useRef<AnalyserNode | null>(null);
   const audioCtx = useRef<AudioContext | null>(null);
   const [inLevel, setInLevel] = useState(0);
+  const [outLevel, setOutLevel] = useState(0);
+  const [speaking, setSpeaking] = useState(false);
+  const [voiceName, setVoiceName] = useState("");
 
   const push = useCallback((kind: LogKind, text: string) => {
     const d = new Date();
@@ -354,6 +396,34 @@ export default function Hud() {
     return () => cancelAnimationFrame(raf);
   }, [micOn]);
 
+  /* ── Prueba de salida ───────────────────────────────────────────────
+     speechSynthesis no expone su audio a Web Audio, así que no hay
+     amplitud real que medir. El medidor refleja actividad: cada palabra
+     pronunciada dispara un evento `boundary` que lo hace latir. */
+  const testOutput = () => {
+    if (!window.speechSynthesis) {
+      push("err", "Este navegador no tiene síntesis de voz");
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(
+      "Consola MATE. Canal de salida verificado. Todos los sistemas responden."
+    );
+    u.lang = "es-AR";
+    const voz = window.speechSynthesis.getVoices().find((v) => v.lang.startsWith("es"));
+    if (voz) { u.voice = voz; setVoiceName(voz.name); }
+
+    u.onstart = () => { setSpeaking(true); push("ok", "Probando canal de salida"); };
+    u.onboundary = () => {
+      setOutLevel(0.35 + Math.random() * 0.5);
+      setTimeout(() => setOutLevel((l) => l * 0.4), 120);
+    };
+    u.onend = () => { setSpeaking(false); setOutLevel(0); push("ok", "Canal de salida verificado"); };
+    u.onerror = () => { setSpeaking(false); setOutLevel(0); push("err", "Falló la síntesis de voz"); };
+
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  };
+
   /* ── Auto-scroll del registro ───────────────────────────────────── */
   useEffect(() => {
     const el = feedRef.current;
@@ -422,11 +492,12 @@ export default function Hud() {
         rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap"
       />
+      <style>{HUD_CSS}</style>
       <div style={S.scan} />
 
-      <div style={S.hud}>
+      <div className="hud-root">
         {/* RIEL */}
-        <header style={S.rail}>
+        <header className="hud-rail" style={S.rail}>
           <div style={S.mark}>
             <b style={S.markB}>MATE</b>
             <span style={S.markS}>Consola de mando</span>
@@ -440,18 +511,18 @@ export default function Hud() {
         </header>
 
         {/* REJILLA */}
-        <div style={S.grid}>
+        <div className="hud-grid">
           {/* IZQUIERDA */}
-          <div style={{ ...S.col, gridTemplateRows: "auto 1fr" }}>
+          <div className="hud-col hud-col-l">
             <section style={S.panel}>
               <h2 style={S.h2}>Vitales del sistema<span style={S.tag}>{vitals ? `${vitals.cpu_cores} núcleos` : "—"}</span></h2>
-              <div style={S.body}>
+              <div className="hud-body" style={S.body}>
                 <div style={{ display: "grid", gap: 13 }}>
                   <Meter label="Procesador" value={vitals?.cpu ?? 0} />
                   <Meter label="Memoria" value={vitals?.memory ?? 0}
                     note={vitals ? `${vitals.memory_used_gb} / ${vitals.memory_total_gb} GB` : ""} />
                   <Meter label="Almacenamiento" value={vitals?.disk ?? 0}
-                    note={vitals ? `${vitals.disk_free_gb} GB libres` : ""} />
+                    note={vitals ? `${vitals.disk_free_gb} GB libres · ${vitals.disk_scope ?? "contenedor"}` : ""} />
                 </div>
                 <div style={S.readouts}>
                   <Readout k="Temperatura" v={vitals?.temperature != null ? `${vitals.temperature} °C` : "n/d"} />
@@ -464,7 +535,7 @@ export default function Hud() {
 
             <section style={S.panel}>
               <h2 style={S.h2}>Carga de red<span style={S.tag}>180 s</span></h2>
-              <div style={{ ...S.body, display: "grid", alignContent: "start", gap: 10 }}>
+              <div className="hud-body" style={{ ...S.body, display: "grid", alignContent: "start", gap: 10 }}>
                 <canvas ref={netCanvas} style={{ display: "block", width: "100%", height: 74 }} />
                 <div style={S.db}>
                   <span>↓ {vitals?.net_rx_mbps.toFixed(2) ?? "—"} MB/s</span>
@@ -475,11 +546,11 @@ export default function Hud() {
           </div>
 
           {/* CENTRO */}
-          <div style={{ ...S.col, gridTemplateRows: "auto 1fr" }}>
+          <div className="hud-col hud-col-m">
             <section style={S.panel}>
               <h2 style={S.h2}>Panel de mandos</h2>
-              <div style={S.body}>
-                <div style={S.mandos}>
+              <div className="hud-body" style={S.body}>
+                <div className="hud-mandos">
                   {commands.map((c) => (
                     <button key={c.id} onClick={c.run} style={S.cmd}>
                       <span style={S.cmdN}>{c.name}</span>
@@ -490,13 +561,13 @@ export default function Hud() {
               </div>
             </section>
 
-            <div style={S.midSplit}>
+            <div className="hud-mid">
               <section style={S.panel}>
                 <h2 style={S.h2}>
                   Conversaciones
                   <span style={S.tag}>{convs.length} en la bóveda</span>
                 </h2>
-                <div style={S.body}>
+                <div className="hud-body" style={S.body}>
                   {convs.length === 0 ? (
                     <p style={S.empty}>Sin conversaciones todavía</p>
                   ) : (
@@ -524,7 +595,7 @@ export default function Hud() {
 
               <section style={S.panel}>
                 <h2 style={S.h2}>Registro<span style={S.tag}>{log.length} entradas</span></h2>
-                <div ref={feedRef} style={{ ...S.body, fontFamily: MONO, fontSize: 12, lineHeight: 1.65 }}>
+                <div ref={feedRef} className="hud-body" style={{ ...S.body, fontFamily: MONO, fontSize: 12, lineHeight: 1.65 }}>
                   {log.map((l) => (
                     <p key={l.id} style={{ margin: 0, display: "flex", gap: 9 }}>
                       <span style={{ color: "#45545F", flex: "none" }}>{l.time}</span>
@@ -540,10 +611,10 @@ export default function Hud() {
           </div>
 
           {/* DERECHA */}
-          <div style={{ ...S.col, gridTemplateRows: "1fr 1fr" }}>
+          <div className="hud-col hud-col-r">
             <section style={S.panel}>
               <h2 style={S.h2}>Agenda<span style={S.tag}>{now.getDate()} {MESES[now.getMonth()]}</span></h2>
-              <div style={S.body}>
+              <div className="hud-body" style={S.body}>
                 {agenda.length === 0 ? (
                   <p style={S.empty}>Sin eventos ni tareas pendientes</p>
                 ) : (
@@ -573,7 +644,7 @@ export default function Hud() {
 
             <section style={S.panel}>
               <h2 style={S.h2}>Bóveda<span style={S.tag}>en vivo</span></h2>
-              <div style={S.body}>
+              <div className="hud-body" style={S.body}>
                 <div style={S.vaultNums}>
                   <VNum k="Documentos" v={vault?.documents ?? 0} d="en la bóveda" />
                   <VNum k="Fragmentos" v={vault?.chunks ?? 0} d="indexados" />
@@ -606,8 +677,8 @@ export default function Hud() {
             Entrada / salida de audio
             <span style={S.tag}>{micError || (micOn ? "captando" : "en reposo")}</span>
           </h2>
-          <div style={S.body}>
-            <div style={S.audioGrid}>
+          <div className="hud-body" style={S.body}>
+            <div className="hud-audio">
               <div style={{ display: "grid", gap: 7 }}>
                 <div style={S.chanHd}>
                   Entrada
@@ -624,12 +695,15 @@ export default function Hud() {
               <div style={{ display: "grid", gap: 7 }}>
                 <div style={S.chanHd}>
                   Salida
-                  <span style={{ marginLeft: "auto", fontFamily: MONO, fontSize: 11, color: "#45545F" }}>
-                    Síntesis de voz — MATE
-                  </span>
+                  <button onClick={testOutput} disabled={speaking} style={S.micBtn}>
+                    {speaking ? "Hablando…" : "Probar salida"}
+                  </button>
                 </div>
-                <Vu level={0} />
-                <div style={S.db}><span>-60</span><span>-24</span><span>-12</span><span>-6</span><span>0 dB</span></div>
+                <Vu level={outLevel} />
+                <div style={S.db}>
+                  <span>Síntesis de voz — {voiceName || "voz del sistema"}</span>
+                  <span>actividad</span>
+                </div>
               </div>
             </div>
           </div>
@@ -733,7 +807,6 @@ const S: Record<string, CSSProperties> = {
       "repeating-linear-gradient(to bottom, rgba(255,255,255,.014) 0 1px, transparent 1px 3px)," +
       "radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(0,0,0,.45) 100%)",
   },
-  hud: { height: "100vh", display: "grid", gridTemplateRows: "auto 1fr auto auto", gap: 10, padding: 10 },
   rail: { display: "flex", alignItems: "center", gap: 20, padding: "10px 14px", background: "#0F151C", border: "1px solid #1D2833" },
   mark: { display: "flex", alignItems: "baseline", gap: 9 },
   markB: { fontFamily: MONO, fontWeight: 700, fontSize: 17, letterSpacing: ".12em", color: "#3FBFB0" },
@@ -742,8 +815,6 @@ const S: Record<string, CSSProperties> = {
   clockWrap: { textAlign: "right" },
   clock: { fontFamily: MONO, fontSize: 22, fontWeight: 500, fontVariantNumeric: "tabular-nums", letterSpacing: ".04em" },
   clockSub: { fontSize: 11, letterSpacing: ".14em", textTransform: "uppercase", color: "#45545F" },
-  grid: { display: "grid", gridTemplateColumns: "300px minmax(0, 1fr) 330px", gap: 10, minHeight: 0 },
-  col: { display: "grid", gap: 10, minHeight: 0 },
   panel: { background: "#0F151C", border: "1px solid #1D2833", display: "flex", flexDirection: "column", minHeight: 0 },
   h2: {
     margin: 0, padding: "8px 12px 7px", fontSize: 11, fontWeight: 600, letterSpacing: ".2em",
@@ -757,14 +828,12 @@ const S: Record<string, CSSProperties> = {
     display: "grid", gridTemplateColumns: "1fr 1fr", gap: "11px 8px",
   },
   db: { fontFamily: MONO, fontSize: 11, fontVariantNumeric: "tabular-nums", color: "#45545F", display: "flex", justifyContent: "space-between" },
-  mandos: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 },
   cmd: {
     textAlign: "left", font: "inherit", color: "#C6D3DE", background: "#141C25",
     border: "1px solid #2A3946", padding: "10px 11px 9px", cursor: "pointer", display: "grid", gap: 3,
   },
   cmdN: { fontSize: 14, fontWeight: 500 },
   cmdK: { fontFamily: MONO, fontSize: 10, letterSpacing: ".06em", color: "#45545F" },
-  midSplit: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10, minHeight: 0 },
   conv: {
     display: "grid", gap: 2, width: "100%", textAlign: "left", font: "inherit",
     background: "transparent", border: "none", borderLeft: "2px solid #2A3946",
@@ -780,7 +849,6 @@ const S: Record<string, CSSProperties> = {
   ingest: { paddingTop: 12, borderTop: "1px solid #1D2833" },
   ingestSt: { fontSize: 12, letterSpacing: ".1em", textTransform: "uppercase", color: "#E8A33D", marginBottom: 6 },
   ingestFn: { fontFamily: MONO, fontSize: 12, color: "#C6D3DE", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  audioGrid: { display: "grid", gridTemplateColumns: "1fr 210px 1fr", gap: 18, alignItems: "center" },
   chanHd: { display: "flex", alignItems: "baseline", gap: 9, fontSize: 11, letterSpacing: ".18em", textTransform: "uppercase", color: "#6E8090" },
   micBtn: {
     marginLeft: "auto", background: "transparent", border: "1px solid #2A3946", color: "#6E8090",

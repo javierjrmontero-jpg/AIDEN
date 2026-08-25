@@ -1,3 +1,4 @@
+import os
 import time
 
 import psutil
@@ -24,10 +25,15 @@ def _temperature() -> float | None:
     return None
 
 
+# El compose monta la raíz del host en /hostfs (solo lectura). Sin ese montaje
+# psutil mediría el sistema de archivos del contenedor, no el del servidor.
+_DISK_PATH = "/hostfs" if os.path.ismount("/hostfs") else "/"
+
+
 @router.get("/system/vitals")
 async def system_vitals(current_user: User = Depends(get_current_user)):
     mem = psutil.virtual_memory()
-    disk = psutil.disk_usage("/")
+    disk = psutil.disk_usage(_DISK_PATH)
     net = psutil.net_io_counters()
     now = time.monotonic()
 
@@ -48,6 +54,7 @@ async def system_vitals(current_user: User = Depends(get_current_user)):
         "memory_total_gb": round(mem.total / 1024**3, 1),
         "disk": disk.percent,
         "disk_free_gb": round(disk.free / 1024**3, 1),
+        "disk_scope": "host" if _DISK_PATH == "/hostfs" else "contenedor",
         "temperature": _temperature(),
         "uptime_seconds": int(time.time() - psutil.boot_time()),
         "processes": len(psutil.pids()),

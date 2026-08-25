@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useGoBack } from "@/components/useGoBack";
 
 export default function Profile() {
   const router = useRouter();
+  const goBack = useGoBack();
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<{name: string; email: string} | null>(null);
   const [role, setRole] = useState("");
@@ -57,7 +59,7 @@ export default function Profile() {
 
         <div className="flex items-center gap-3 mb-8">
           <button
-            onClick={() => router.push("/")}
+            onClick={() => goBack()}
             className="p-2 rounded-lg hover:bg-gray-800 text-gray-500 hover:text-gray-300 transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
