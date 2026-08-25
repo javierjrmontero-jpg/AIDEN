@@ -156,6 +156,15 @@ export default function Hud() {
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const [transcribing, setTranscribing] = useState(false);
+
+  // Detección de voz en el navegador: corta sola al terminar de hablar para
+  // no seguir grabando ambiente, que es lo que hace alucinar a Whisper.
+  const hablo = useRef(false);
+  const ultimoSonido = useRef(0);
+  const inicioGrab = useRef(0);
+  const UMBRAL_VOZ = 0.08;      // pico normalizado por encima del ruido de sala
+  const SILENCIO_MS = 1500;     // silencio que da por terminada la frase
+  const MAX_GRAB_MS = 20000;    // tope duro por si nunca detecta silencio
   const [inLevel, setInLevel] = useState(0);
   const [outLevel, setOutLevel] = useState(0);
   const [speaking, setSpeaking] = useState(false);
@@ -351,7 +360,16 @@ export default function Hud() {
       return;
     }
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const s = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      hablo.current = false;
+      ultimoSonido.current = 0;
+      inicioGrab.current = Date.now();
       const ctx = new AudioContext();
       const an = ctx.createAnalyser();
       an.fftSize = 512;
@@ -361,7 +379,12 @@ export default function Hud() {
       const mr = new MediaRecorder(s);
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
       mr.onstop = async () => {
+        const huboVoz = hablo.current;
         cerrarMic();
+        if (!huboVoz) {
+          push("warn", "No se detectó voz — no se envió nada a transcribir");
+          return;
+        }
         await procesarVoz(new Blob(chunks, { type: "audio/webm" }));
       };
       mr.start();
@@ -372,7 +395,7 @@ export default function Hud() {
       recorder.current = mr;
       setMicOn(true);
       setMicError("");
-      push("ok", "Escuchando — volvé a tocar para enviar");
+      push("ok", "Escuchando — corta sola al terminar de hablar");
     } catch {
       setMicError("Sin permiso de micrófono");
       push("err", "El navegador denegó el acceso al micrófono");
@@ -426,6 +449,20 @@ export default function Hud() {
         let peak = 0;
         for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128) / 128);
         setInLevel(peak);
+
+        // Corte automático: espera a que empieces a hablar, y cierra cuando
+        // llevás SILENCIO_MS callado. Sin esto la grabación sigue tomando sala.
+        const ahora = Date.now();
+        if (peak > UMBRAL_VOZ) {
+          hablo.current = true;
+          ultimoSonido.current = ahora;
+        }
+        const callado = hablo.current && ahora - ultimoSonido.current > SILENCIO_MS;
+        const pasado = ahora - inicioGrab.current > MAX_GRAB_MS;
+        if ((callado || pasado) && recorder.current?.state === "recording") {
+          recorder.current.stop();
+          setMicOn(false);
+        }
 
         const cx = cv.getContext("2d");
         if (cx) {

@@ -34,15 +34,37 @@ def _get_model() -> WhisperModel:
     return _model
 
 
+# Whisper alucina sobre audio sin voz: ante silencio o ruido ambiente devuelve
+# frases inventadas, casi siempre estas. Se descartan por si alguna se cuela.
+_ALUCINACIONES = (
+    "subtítulos realizados por",
+    "subtitulado por",
+    "gracias por ver el video",
+    "gracias por ver este video",
+    "más videos en",
+    "amara.org",
+)
+
+
 def _transcribe_sync(audio_path: str, language: str) -> str:
     model = _get_model()
     segments, _info = model.transcribe(
         audio_path,
         language=language or None,
-        beam_size=1,            # rápido; subir a 5 mejora calidad pero es más lento
-        vad_filter=False,       # se puede activar para recortar silencios
+        beam_size=5,                      # greedy (1) degrada bastante en español
+        vad_filter=True,                  # recorta lo que no es voz antes de decodificar
+        vad_parameters={"min_silence_duration_ms": 500},
+        condition_on_previous_text=False,  # evita que se realimente su propia alucinación
+        no_speech_threshold=0.6,
     )
-    return " ".join(seg.text for seg in segments).strip()
+
+    texto = " ".join(seg.text for seg in segments).strip()
+
+    normalizado = texto.lower()
+    if any(frase in normalizado for frase in _ALUCINACIONES):
+        logger.info(f"Descartada transcripción alucinada: {texto!r}")
+        return ""
+    return texto
 
 
 async def transcribe_audio(audio_bytes: bytes, language: str = "es") -> str:
