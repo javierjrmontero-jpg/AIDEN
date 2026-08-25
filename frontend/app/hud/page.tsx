@@ -36,7 +36,8 @@ interface CalEvent {
   title?: string;
   summary?: string;
   start?: string;
-  source?: string;
+  account?: string;
+  error?: boolean;
 }
 
 interface Task {
@@ -44,6 +45,13 @@ interface Task {
   title: string;
   due_date?: string | null;
   completed: boolean;
+}
+
+interface Conv {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
 }
 
 type LogKind = "ok" | "warn" | "err" | "net" | "vlt";
@@ -76,6 +84,14 @@ const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "o
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+function relTime(then: Date, now: Date): string {
+  const s = Math.max(0, Math.floor((now.getTime() - then.getTime()) / 1000));
+  if (s < 60) return "hace instantes";
+  if (s < 3600) return `hace ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `hace ${Math.floor(s / 3600)} h`;
+  return `hace ${Math.floor(s / 86400)} d`;
+}
+
 export default function Hud() {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -84,6 +100,7 @@ export default function Hud() {
   const [vault, setVault] = useState<Vault | null>(null);
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [convs, setConvs] = useState<Conv[]>([]);
   const [log, setLog] = useState<LogLine[]>([]);
   const [now, setNow] = useState(new Date());
   const [online, setOnline] = useState(true);
@@ -173,6 +190,31 @@ export default function Hud() {
     };
     tick();
     const i = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(i); };
+  }, [token, authFetch, push]);
+
+  /* ── Conversaciones cada 20 s ───────────────────────────────────── */
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    let prevTop = "";
+    const tick = async () => {
+      try {
+        const c: Conv[] = await authFetch("/api/v1/conversations");
+        if (!alive) return;
+        const ordered = [...c].sort(
+          (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+        );
+        setConvs(ordered);
+        const top = ordered[0];
+        if (prevTop && top && top.updated_at !== prevTop) {
+          push("net", `Actividad en «${top.title || "sin título"}»`);
+        }
+        prevTop = top?.updated_at ?? "";
+      } catch { /* el estado de conexión ya lo marca vitales */ }
+    };
+    tick();
+    const i = setInterval(tick, 20000);
     return () => { alive = false; clearInterval(i); };
   }, [token, authFetch, push]);
 
@@ -319,19 +361,31 @@ export default function Hud() {
   }, [log]);
 
   /* ── Mandos ─────────────────────────────────────────────────────── */
+  // El briefing no tiene pantalla propia: se ejecuta acá y reporta en el registro.
+  const runBriefing = async () => {
+    push("net", "Componiendo briefing del día…");
+    try {
+      const b = await authFetch("/api/v1/briefing");
+      const texto = typeof b === "string" ? b : b.briefing || b.summary || "";
+      push("ok", texto ? `Briefing listo — ${texto.slice(0, 90)}…` : "Briefing listo, sin contenido");
+    } catch {
+      push("err", "No se pudo componer el briefing");
+    }
+  };
+
   const commands = [
     { id: "chat", name: "Nueva conversación", key: "CTRL + K", run: () => router.push("/") },
     { id: "ingest", name: "Ingerir documento", key: "CTRL + I", run: () => router.push("/documents") },
     { id: "agent", name: "Agente autónomo", key: "CTRL + A", run: () => router.push("/agent") },
-    { id: "brief", name: "Briefing del día", key: "CTRL + B", run: () => router.push("/briefing") },
-    { id: "sync", name: "Sincronizar agenda", key: "CTRL + S", run: () => router.push("/calendar") },
-    { id: "vault", name: "Bóveda", key: "CTRL + F", run: () => router.push("/documents") },
+    { id: "brief", name: "Briefing del día", key: "CTRL + B", run: runBriefing },
+    { id: "sync", name: "Agenda", key: "CTRL + S", run: () => router.push("/calendar") },
+    { id: "tasks", name: "Tareas", key: "CTRL + T", run: () => router.push("/tasks") },
   ];
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.metaKey || e.altKey) return;
-      const map: Record<string, string> = { k: "chat", i: "ingest", a: "agent", b: "brief", s: "sync", f: "vault" };
+      const map: Record<string, string> = { k: "chat", i: "ingest", a: "agent", b: "brief", s: "sync", t: "tasks" };
       const id = map[e.key.toLowerCase()];
       if (!id) return;
       e.preventDefault();
@@ -347,10 +401,10 @@ export default function Hud() {
     : "—";
 
   const agenda = [
-    ...events.map((e) => ({
+    ...events.filter((e) => !e.error).map((e) => ({
       time: e.start ? new Date(e.start) : null,
       title: e.title || e.summary || "Evento",
-      meta: e.source || "Calendario",
+      meta: e.account || "Calendario",
     })),
     ...tasks.map((t) => ({
       time: t.due_date ? new Date(t.due_date) : null,
@@ -436,20 +490,53 @@ export default function Hud() {
               </div>
             </section>
 
-            <section style={S.panel}>
-              <h2 style={S.h2}>Registro de eventos<span style={S.tag}>{log.length} entradas</span></h2>
-              <div ref={feedRef} style={{ ...S.body, fontFamily: MONO, fontSize: 12, lineHeight: 1.65 }}>
-                {log.map((l) => (
-                  <p key={l.id} style={{ margin: 0, display: "flex", gap: 9 }}>
-                    <span style={{ color: "#45545F", flex: "none" }}>{l.time}</span>
-                    <span style={{ color: KIND_COLOR[l.kind], flex: "none", width: 58, letterSpacing: ".06em" }}>
-                      {KIND_LABEL[l.kind]}
-                    </span>
-                    <span style={{ color: "#6E8090" }}>{l.text}</span>
-                  </p>
-                ))}
-              </div>
-            </section>
+            <div style={S.midSplit}>
+              <section style={S.panel}>
+                <h2 style={S.h2}>
+                  Conversaciones
+                  <span style={S.tag}>{convs.length} en la bóveda</span>
+                </h2>
+                <div style={S.body}>
+                  {convs.length === 0 ? (
+                    <p style={S.empty}>Sin conversaciones todavía</p>
+                  ) : (
+                    convs.slice(0, 12).map((c, i) => (
+                      <button
+                        key={c.id}
+                        onClick={() => router.push(`/?c=${c.id}`)}
+                        style={{
+                          ...S.conv,
+                          borderLeftColor: i === 0 ? "#3FBFB0" : "#2A3946",
+                          background: i === 0 ? "#141C25" : "transparent",
+                        }}
+                      >
+                        <span style={{ ...S.convT, color: i === 0 ? "#3FBFB0" : "#C6D3DE" }}>
+                          {c.title || "Sin título"}
+                        </span>
+                        <span style={S.convM}>
+                          {i === 0 ? "en curso · " : ""}{relTime(new Date(c.updated_at), now)}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              <section style={S.panel}>
+                <h2 style={S.h2}>Registro<span style={S.tag}>{log.length} entradas</span></h2>
+                <div ref={feedRef} style={{ ...S.body, fontFamily: MONO, fontSize: 12, lineHeight: 1.65 }}>
+                  {log.map((l) => (
+                    <p key={l.id} style={{ margin: 0, display: "flex", gap: 9 }}>
+                      <span style={{ color: "#45545F", flex: "none" }}>{l.time}</span>
+                      <span style={{ color: KIND_COLOR[l.kind], flex: "none", width: 58, letterSpacing: ".06em" }}>
+                        {KIND_LABEL[l.kind]}
+                      </span>
+                      <span style={{ color: "#6E8090" }}>{l.text}</span>
+                    </p>
+                  ))}
+                </div>
+              </section>
+            </div>
           </div>
 
           {/* DERECHA */}
@@ -677,6 +764,14 @@ const S: Record<string, CSSProperties> = {
   },
   cmdN: { fontSize: 14, fontWeight: 500 },
   cmdK: { fontFamily: MONO, fontSize: 10, letterSpacing: ".06em", color: "#45545F" },
+  midSplit: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10, minHeight: 0 },
+  conv: {
+    display: "grid", gap: 2, width: "100%", textAlign: "left", font: "inherit",
+    background: "transparent", border: "none", borderLeft: "2px solid #2A3946",
+    padding: "8px 10px", cursor: "pointer",
+  },
+  convT: { fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  convM: { fontFamily: MONO, fontSize: 11, color: "#45545F" },
   ev: { display: "grid", gridTemplateColumns: "52px 1fr", gap: 11, padding: "9px 10px", borderLeft: "2px solid #2A3946" },
   evH: { fontFamily: MONO, fontSize: 13, fontVariantNumeric: "tabular-nums" },
   evM: { fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase", color: "#45545F", marginTop: 1 },

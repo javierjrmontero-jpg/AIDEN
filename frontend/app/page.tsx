@@ -133,6 +133,16 @@ useEffect(() => {
     if (token) loadConversations();
   }, [token, loadConversations]);
 
+  // Deep link desde el HUD: /?c=<id> abre esa conversación y limpia la URL
+  useEffect(() => {
+    if (!token) return;
+    const id = new URLSearchParams(window.location.search).get("c");
+    if (!id) return;
+    window.history.replaceState({}, "", "/");
+    loadConversation(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   // Verificar crédito Brave
   useEffect(() => {
     if (!token) return;
@@ -560,6 +570,11 @@ if (ttsEnabled) {
   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
   <span className="text-sm">📊</span>
   <span className="text-xs text-gray-400">Estadísticas</span>
+</button>
+          <button onClick={() => router.push("/hud")}
+  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+  <span className="text-sm">🛰️</span>
+  <span className="text-xs text-gray-400">Consola</span>
 </button>
                     {user?.is_admin && (
                       
