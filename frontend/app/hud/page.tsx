@@ -92,7 +92,7 @@ const HUD_CSS = `
 .hud-grid  { display:grid; grid-template-columns:300px minmax(0,1fr) 330px; gap:10px; min-height:0; }
 .hud-col   { display:grid; gap:10px; min-height:0; }
 .hud-col-l { grid-template-rows:auto 1fr; }
-.hud-col-m { grid-template-rows:auto 1fr; }
+.hud-col-m { grid-template-rows:auto auto 1fr; }
 .hud-col-r { grid-template-rows:1fr 1fr; }
 .hud-mid   { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; min-height:0; }
 .hud-audio { display:grid; grid-template-columns:1fr 210px 1fr; gap:18px; align-items:center; }
@@ -672,6 +672,13 @@ export default function Hud() {
   });
 
   /* ── Derivados ──────────────────────────────────────────────────── */
+  const orbState: OrbState =
+    speaking ? "speaking"
+    : asking || transcribing ? "thinking"
+    : micOn ? "listening"
+    : "idle";
+  const orbLevel = speaking ? outLevel : micOn ? inLevel : 0;
+
   const uptime = vitals
     ? `${Math.floor(vitals.uptime_seconds / 3600)}h ${pad(Math.floor((vitals.uptime_seconds % 3600) / 60))}m`
     : "—";
@@ -753,6 +760,17 @@ export default function Hud() {
 
           {/* CENTRO */}
           <div className="hud-col hud-col-m">
+            <section style={{ ...S.panel, alignItems: "center", padding: "14px 0 12px" }}>
+              <button
+                onClick={toggleMic}
+                disabled={transcribing || asking}
+                title={micOn ? "Cortar y enviar" : "Hablarle a MATE"}
+                style={S.orbBtn}
+              >
+                <Orb state={orbState} level={orbLevel} />
+              </button>
+            </section>
+
             <section style={S.panel}>
               <h2 style={S.h2}>Panel de mandos</h2>
               <div className="hud-body" style={S.body}>
@@ -956,6 +974,149 @@ export default function Hud() {
 
 /* ── Subcomponentes ───────────────────────────────────────────────── */
 
+/* ── Orbe ───────────────────────────────────────────────────────────
+   Un solo elemento que dice de un vistazo qué está haciendo la consola.
+   No es decoración: el radio del núcleo sigue el nivel real de audio y
+   cada estado tiene su propio comportamiento. */
+
+type OrbState = "idle" | "listening" | "thinking" | "speaking";
+
+const ORB_LABEL: Record<OrbState, string> = {
+  idle: "en espera",
+  listening: "escuchando",
+  thinking: "procesando",
+  speaking: "respondiendo",
+};
+
+function Orb({ state, level }: { state: OrbState; level: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const nivel = useRef(0);
+
+  // El bucle se monta una sola vez: si dependiera de `level` se recrearia
+  // en cada cuadro. Las props entran por refs, que siempre estan al dia.
+  const estado = useRef(state);
+  const objetivo = useRef(level);
+  estado.current = state;
+  objetivo.current = level;
+
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const cx = cv.getContext("2d");
+    if (!cx) return;
+
+    const quieto = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let raf = 0;
+    let t = 0;
+
+    const dibujar = () => {
+      const r = window.devicePixelRatio || 1;
+      const w = cv.clientWidth;
+      const h = cv.clientHeight;
+      if (!w || !h) { raf = requestAnimationFrame(dibujar); return; }
+      cv.width = w * r;
+      cv.height = h * r;
+      cx.setTransform(r, 0, 0, r, 0, 0);
+      cx.clearRect(0, 0, w, h);
+
+      const cxp = w / 2;
+      const cyp = h / 2;
+      const base = Math.min(w, h) / 2 - 10;
+
+      // El nivel persigue al valor real: evita saltos bruscos entre cuadros
+      const state = estado.current;
+      nivel.current += (objetivo.current - nivel.current) * 0.18;
+      const n = nivel.current;
+
+      const respira = quieto ? 0 : Math.sin(t * 0.03) * 0.5 + 0.5;
+      const activo = state !== "idle";
+
+      // Halo
+      const halo = cx.createRadialGradient(cxp, cyp, base * 0.1, cxp, cyp, base);
+      const fuerza = 0.1 + (activo ? n * 0.45 : respira * 0.08);
+      halo.addColorStop(0, `rgba(63,191,176,${0.26 + fuerza})`);
+      halo.addColorStop(0.55, `rgba(63,191,176,${0.07 + fuerza * 0.3})`);
+      halo.addColorStop(1, "rgba(63,191,176,0)");
+      cx.fillStyle = halo;
+      cx.beginPath();
+      cx.arc(cxp, cyp, base, 0, Math.PI * 2);
+      cx.fill();
+
+      // Anillos que giran: al pensar aceleran y se abren
+      const anillos = [
+        { r: base * 0.86, vel: 0.006, arco: 1.5, ancho: 1 },
+        { r: base * 0.72, vel: -0.011, arco: 0.9, ancho: 1.5 },
+        { r: base * 0.58, vel: 0.017, arco: 2.3, ancho: 1 },
+      ];
+      const prisa = state === "thinking" ? 3.4 : 1;
+      anillos.forEach((a, i) => {
+        const giro = t * a.vel * prisa + i * 2.1;
+        cx.beginPath();
+        cx.arc(cxp, cyp, a.r, giro, giro + a.arco);
+        cx.strokeStyle = `rgba(63,191,176,${state === "thinking" ? 0.75 : 0.4 + n * 0.4})`;
+        cx.lineWidth = a.ancho;
+        cx.stroke();
+      });
+
+      // Anillo de referencia, siempre presente
+      cx.beginPath();
+      cx.arc(cxp, cyp, base * 0.92, 0, Math.PI * 2);
+      cx.strokeStyle = "rgba(63,191,176,.14)";
+      cx.lineWidth = 1;
+      cx.stroke();
+
+      // Púas radiales: sólo cuando hay audio real que representar
+      if (state === "listening" || state === "speaking") {
+        const puas = 48;
+        for (let i = 0; i < puas; i++) {
+          const ang = (i / puas) * Math.PI * 2;
+          const ruido = Math.abs(Math.sin(i * 12.9898 + t * 0.06));
+          const largo = base * 0.1 + n * base * 0.3 * ruido;
+          const r0 = base * 0.44;
+          cx.beginPath();
+          cx.moveTo(cxp + Math.cos(ang) * r0, cyp + Math.sin(ang) * r0);
+          cx.lineTo(cxp + Math.cos(ang) * (r0 + largo), cyp + Math.sin(ang) * (r0 + largo));
+          cx.strokeStyle =
+            state === "speaking"
+              ? `rgba(139,159,209,${0.35 + n * 0.5})`
+              : `rgba(63,191,176,${0.35 + n * 0.5})`;
+          cx.lineWidth = 1.5;
+          cx.stroke();
+        }
+      }
+
+      // Núcleo
+      const rn = base * (0.26 + (activo ? n * 0.12 : respira * 0.03));
+      const nucleo = cx.createRadialGradient(cxp, cyp, 0, cxp, cyp, rn);
+      nucleo.addColorStop(0, "rgba(214,245,241,.95)");
+      nucleo.addColorStop(0.45, `rgba(63,191,176,${0.8 + n * 0.2})`);
+      nucleo.addColorStop(1, "rgba(31,107,100,0)");
+      cx.fillStyle = nucleo;
+      cx.beginPath();
+      cx.arc(cxp, cyp, rn, 0, Math.PI * 2);
+      cx.fill();
+
+      t++;
+      if (!quieto) raf = requestAnimationFrame(dibujar);
+    };
+
+    dibujar();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <div style={{ display: "grid", justifyItems: "center", gap: 6 }}>
+      <canvas ref={ref} style={{ width: 190, height: 190, display: "block" }} />
+      <span style={{
+        fontFamily: MONO, fontSize: 10, letterSpacing: ".22em",
+        textTransform: "uppercase", color: state === "idle" ? "#45545F" : "#3FBFB0",
+      }}>
+        {ORB_LABEL[state]}
+      </span>
+    </div>
+  );
+}
+
 function segColor(pct: number) {
   return pct > 88 ? "#E5544B" : pct > 70 ? "#E8A33D" : "#3FBFB0";
 }
@@ -1098,5 +1259,9 @@ const S: Record<string, CSSProperties> = {
   },
   said: { margin: 0, fontSize: 13, color: "#6E8090" },
   reply: { margin: 0, fontSize: 14, color: "#C6D3DE", lineHeight: 1.5 },
+  orbBtn: {
+    background: "transparent", border: "none", padding: 0,
+    cursor: "pointer", display: "block", font: "inherit",
+  },
   statusB: { color: "#6E8090", fontWeight: 400 },
 };
