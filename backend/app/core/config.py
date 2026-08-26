@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_CALENDAR_ENABLED: bool = True
+    # El login web y el calendario usan clientes OAuth distintos: el script de
+    # autorización necesita un cliente de escritorio (redirect a localhost), que
+    # el cliente web no admite. Un refresh_token solo se canjea con el par que
+    # lo emitió. Si quedan vacías, se usan las del login.
+    GOOGLE_CALENDAR_CLIENT_ID: str = ""
+    GOOGLE_CALENDAR_CLIENT_SECRET: str = ""
     MICROSOFT_CLIENT_ID: str = ""
     MICROSOFT_CLIENT_SECRET: str = ""
     WHISPER_MODEL: str = "base"

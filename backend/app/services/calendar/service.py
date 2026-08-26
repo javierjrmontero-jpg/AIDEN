@@ -55,12 +55,13 @@ def _normalize_datetime(value: str) -> str:
 # Helpers síncronos (se ejecutan en thread aparte)
 # --------------------------------------------------------------------------- #
 def _credentials(refresh_token: str) -> Credentials:
+    # Preferimos el cliente de escritorio, que es el que emite estos tokens.
     return Credentials(
         token=None,
         refresh_token=refresh_token,
         token_uri=TOKEN_URI,
-        client_id=settings.GOOGLE_CLIENT_ID,
-        client_secret=settings.GOOGLE_CLIENT_SECRET,
+        client_id=settings.GOOGLE_CALENDAR_CLIENT_ID or settings.GOOGLE_CLIENT_ID,
+        client_secret=settings.GOOGLE_CALENDAR_CLIENT_SECRET or settings.GOOGLE_CLIENT_SECRET,
         scopes=SCOPES,
     )
 
