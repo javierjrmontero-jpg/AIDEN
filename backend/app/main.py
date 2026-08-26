@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from app.api import chat, conversations, auth, documents, generate, memories, sandbox, admin, tasks, email, stats, agent, calendar, voice, audit, briefing, briefing_weekly, tasks_prioritize, email_followup, autonomous_rules, context_extract, user_settings, domotica, webhook, oauth, mfa, system
+from app.api import chat, conversations, auth, documents, generate, memories, sandbox, admin, tasks, email, stats, agent, calendar, voice, audit, briefing, briefing_weekly, tasks_prioritize, email_followup, autonomous_rules, context_extract, user_settings, domotica, webhook, oauth, mfa, system, calendar_oauth
 from app.core.config import settings
 from app.core.database import init_db
 
@@ -73,6 +73,7 @@ app.include_router(webhook.router, prefix="/api/v1")
 app.include_router(oauth.router, prefix="/api/v1")
 app.include_router(mfa.router, prefix="/api/v1")
 app.include_router(system.router, prefix="/api/v1")
+app.include_router(calendar_oauth.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

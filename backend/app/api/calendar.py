@@ -49,6 +49,7 @@ async def get_calendar_configs(
             "id": c.id,
             "provider": c.provider,
             "google_email": c.google_email,
+            "client_kind": getattr(c, "client_kind", "desktop"),
             "calendar_id": c.calendar_id,
             "enabled": c.enabled,
         }
@@ -64,7 +65,9 @@ async def add_calendar_config(
 ):
     # Valida el refresh_token contra Google y obtiene el email de la cuenta
     try:
-        google_email = await get_account_email(request.refresh_token)
+        # Esta ruta es la del script de administración, que usa el cliente
+        # de escritorio. El alta desde la interfaz va por calendar_oauth.
+        google_email = await get_account_email(request.refresh_token, "desktop")
     except Exception as ex:
         raise HTTPException(400, f"Refresh token inválido o sin permisos: {ex}")
 
@@ -77,6 +80,7 @@ async def add_calendar_config(
 
     if existing:
         existing.refresh_token = request.refresh_token
+        existing.client_kind = "desktop"
         existing.calendar_id = request.calendar_id or "primary"
         existing.enabled = True
         existing.updated_at = datetime.utcnow()
@@ -88,6 +92,7 @@ async def add_calendar_config(
                 provider="google",
                 google_email=google_email,
                 refresh_token=request.refresh_token,
+                client_kind="desktop",
                 calendar_id=request.calendar_id or "primary",
             )
         )

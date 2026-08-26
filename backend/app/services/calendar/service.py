@@ -54,26 +54,38 @@ def _normalize_datetime(value: str) -> str:
 # --------------------------------------------------------------------------- #
 # Helpers síncronos (se ejecutan en thread aparte)
 # --------------------------------------------------------------------------- #
-def _credentials(refresh_token: str) -> Credentials:
-    # Preferimos el cliente de escritorio, que es el que emite estos tokens.
+def _client_pair(client_kind: str) -> tuple[str, str]:
+    """Un refresh_token solo se canjea con el par que lo emitió."""
+    if client_kind == "desktop":
+        return (
+            settings.GOOGLE_CALENDAR_CLIENT_ID or settings.GOOGLE_CLIENT_ID,
+            settings.GOOGLE_CALENDAR_CLIENT_SECRET or settings.GOOGLE_CLIENT_SECRET,
+        )
+    return settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
+
+
+def _credentials(refresh_token: str, client_kind: str = "web") -> Credentials:
+    client_id, client_secret = _client_pair(client_kind)
     return Credentials(
         token=None,
         refresh_token=refresh_token,
         token_uri=TOKEN_URI,
-        client_id=settings.GOOGLE_CALENDAR_CLIENT_ID or settings.GOOGLE_CLIENT_ID,
-        client_secret=settings.GOOGLE_CALENDAR_CLIENT_SECRET or settings.GOOGLE_CLIENT_SECRET,
+        client_id=client_id,
+        client_secret=client_secret,
         scopes=SCOPES,
     )
 
 
-def _build_service(refresh_token: str):
-    creds = _credentials(refresh_token)
+def _build_service(refresh_token: str, client_kind: str = "web"):
+    creds = _credentials(refresh_token, client_kind)
     creds.refresh(Request())  # obtiene un access_token fresco
     return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
 
-def _list_sync(refresh_token: str, calendar_id: str, max_results: int, days_ahead: int):
-    service = _build_service(refresh_token)
+def _list_sync(
+    refresh_token: str,
+    client_kind: str, calendar_id: str, max_results: int, days_ahead: int):
+    service = _build_service(refresh_token, client_kind)
     now = datetime.now(timezone.utc)
     result = (
         service.events()
@@ -108,6 +120,7 @@ def _list_sync(refresh_token: str, calendar_id: str, max_results: int, days_ahea
 
 def _create_sync(
     refresh_token: str,
+    client_kind: str,
     calendar_id: str,
     summary: str,
     start_iso: str,
@@ -116,7 +129,7 @@ def _create_sync(
     location: str,
     tz: str,
 ):
-    service = _build_service(refresh_token)
+    service = _build_service(refresh_token, client_kind)
     body = {"summary": summary}
     if description:
         body["description"] = description
@@ -146,10 +159,12 @@ def _create_sync(
     }
 
 
-def _account_email_sync(refresh_token: str) -> str:
+def _account_email_sync(
+    refresh_token: str,
+    client_kind: str) -> str:
     """Devuelve el email de la cuenta (id del calendario primario).
     Sirve además para validar que el refresh_token funciona."""
-    service = _build_service(refresh_token)
+    service = _build_service(refresh_token, client_kind)
     cal = service.calendars().get(calendarId="primary").execute()
     return cal.get("id", "")
 
@@ -157,14 +172,26 @@ def _account_email_sync(refresh_token: str) -> str:
 # --------------------------------------------------------------------------- #
 # API pública asíncrona
 # --------------------------------------------------------------------------- #
+def _kind(config) -> str:
+    """Filas anteriores a esta columna vienen del script de escritorio."""
+    return getattr(config, "client_kind", None) or "desktop"
+
+
 async def list_upcoming_events(config, max_results: int = 10, days_ahead: int = 7):
     return await asyncio.to_thread(
-        _list_sync, config.refresh_token, config.calendar_id or "primary", max_results, days_ahead
+        _list_sync,
+        config.refresh_token,
+        _kind(config),
+        config.calendar_id or "primary",
+        max_results,
+        days_ahead,
     )
 
 
-def _list_range_sync(refresh_token: str, calendar_id: str, time_min: str, time_max: str, max_results: int):
-    service = _build_service(refresh_token)
+def _list_range_sync(
+    refresh_token: str,
+    client_kind: str, calendar_id: str, time_min: str, time_max: str, max_results: int):
+    service = _build_service(refresh_token, client_kind)
     result = (
         service.events()
         .list(
@@ -196,6 +223,7 @@ async def list_events_range(config, time_min: str, time_max: str, max_results: i
     return await asyncio.to_thread(
         _list_range_sync,
         config.refresh_token,
+        _kind(config),
         config.calendar_id or "primary",
         time_min,
         time_max,
@@ -226,6 +254,7 @@ async def create_event(
     return await asyncio.to_thread(
         _create_sync,
         config.refresh_token,
+        _kind(config),
         config.calendar_id or "primary",
         summary,
         start_norm,
@@ -236,8 +265,8 @@ async def create_event(
     )
 
 
-async def get_account_email(refresh_token: str) -> str:
-    return await asyncio.to_thread(_account_email_sync, refresh_token)
+async def get_account_email(refresh_token: str, client_kind: str = "web") -> str:
+    return await asyncio.to_thread(_account_email_sync, refresh_token, client_kind)
 
 
 def format_events_for_prompt(events: list) -> str:

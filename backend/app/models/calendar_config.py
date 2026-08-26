@@ -12,6 +12,10 @@ class CalendarConfig(Base):
     provider = Column(String(50), nullable=False, default="google")
     google_email = Column(String(200), nullable=True)
     refresh_token = Column(String(500), nullable=False)
+    # Qué cliente OAuth emitió el token: "web" (botón dentro de MATE) o
+    # "desktop" (script de administración). Un refresh_token solo se canjea
+    # con el mismo par de credenciales que lo emitió.
+    client_kind = Column(String(20), nullable=False, default="web")
     calendar_id = Column(String(200), nullable=False, default="primary")
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)

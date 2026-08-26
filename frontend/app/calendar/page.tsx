@@ -97,6 +97,36 @@ export default function Calendar() {
     loadAccounts(t);
   }, [router, loadAccounts]);
 
+  // Alta desde la interfaz: no expone el secreto de la app ni exige script.
+  const conectarGoogle = async () => {
+    if (!token) return;
+    setConnMsg("");
+    try {
+      const res = await fetch("/api/v1/calendar/connect/google", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) { setConnMsg(data.detail || "No se pudo iniciar la conexión"); return; }
+      const win = window.open(data.url, "mate_calendar_oauth", "width=520,height=680");
+      if (!win) { setConnMsg("El navegador bloqueó la ventana emergente. Permitila y reintentá."); return; }
+      // La ventana avisa al terminar; si el usuario la cierra a mano, el
+      // intervalo igual recarga la lista.
+      const onMsg = (e: MessageEvent) => {
+        if (e.data === "calendar-connected") { loadAccounts(token); setConnMsg("Cuenta conectada."); }
+      };
+      window.addEventListener("message", onMsg);
+      const iv = setInterval(() => {
+        if (win.closed) {
+          clearInterval(iv);
+          window.removeEventListener("message", onMsg);
+          loadAccounts(token);
+        }
+      }, 800);
+    } catch {
+      setConnMsg("Error de red");
+    }
+  };
+
   const saveConnection = async () => {
     if (!token || !refreshToken.trim()) return;
     setSavingConn(true);
@@ -334,9 +364,25 @@ export default function Calendar() {
             <div className="pt-3 border-t border-gray-800">
               <h2 className="text-sm font-semibold text-gray-100 mb-2">Conectar nueva cuenta</h2>
               <p className="text-xs text-gray-500 mb-3 leading-relaxed">
-                Generá el <code className="text-emerald-500">refresh_token</code> ejecutando{" "}
-                <code className="text-gray-300">scripts/google_calendar_auth.py</code> en tu PC y pegalo acá.
+                Autorizá tu cuenta de Google. Se abre una ventana de Google, elegís
+                la cuenta y volvés acá — cada usuario conecta su propia agenda.
               </p>
+              <button
+                onClick={conectarGoogle}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm transition-colors"
+              >
+                Conectar Google Calendar
+              </button>
+              {connMsg && <p className="text-xs text-gray-400 mt-2">{connMsg}</p>}
+
+              <details className="mt-5">
+                <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-400">
+                  Alta manual con refresh_token (administración)
+                </summary>
+                <p className="text-xs text-gray-500 my-3 leading-relaxed">
+                  Generalo con <code className="text-gray-300">scripts/google_calendar_auth.py</code>.
+                  Requiere un cliente OAuth de escritorio configurado en el servidor.
+                </p>
               <textarea
                 className={input}
                 rows={3}
@@ -349,9 +395,9 @@ export default function Calendar() {
                 disabled={savingConn || !refreshToken.trim()}
                 className="mt-3 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded-lg text-sm transition-colors"
               >
-                {savingConn ? "Validando…" : "Conectar"}
+                {savingConn ? "Validando…" : "Conectar con token"}
               </button>
-              {connMsg && <p className="text-xs text-gray-400 mt-2">{connMsg}</p>}
+              </details>
             </div>
           </div>
         )}

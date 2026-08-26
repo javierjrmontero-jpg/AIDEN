@@ -26,6 +26,9 @@ async def init_db():
         for col, ddl in [
             ("totp_secret", "ALTER TABLE users ADD COLUMN totp_secret VARCHAR"),
             ("totp_enabled", "ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN DEFAULT 0"),
+            # Las filas que ya existen vienen del script de administración, que
+            # usa el cliente de escritorio.
+            ("client_kind", "ALTER TABLE calendar_configs ADD COLUMN client_kind VARCHAR(20) DEFAULT 'desktop'"),
         ]:
             try:
                 await conn.execute(text(ddl))
