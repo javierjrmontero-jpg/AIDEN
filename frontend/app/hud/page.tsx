@@ -475,8 +475,15 @@ export default function Hud() {
 
   /* ── De voz a acción ─────────────────────────────────────────────── */
   const procesarVoz = async (blob: Blob) => {
+    // Un fragmento minúsculo no contiene voz utilizable y el contenedor webm
+    // sin cabecera completa hace fallar el decodificador del backend.
+    if (blob.size < 4000) {
+      push("warn", `Fragmento demasiado corto (${blob.size} B) — descartado`);
+      return;
+    }
+
     setTranscribing(true);
-    push("net", "Transcribiendo…");
+    push("net", `Transcribiendo ${(blob.size / 1024).toFixed(0)} KB…`);
     try {
       const fd = new FormData();
       fd.append("file", blob, "audio.webm");
@@ -486,7 +493,10 @@ export default function Hud() {
         headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) {
+        const detalle = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${detalle.slice(0, 200)}`);
+      }
       const { text } = await res.json();
       const dicho = (text || "").trim();
       if (!dicho) { push("warn", "No se entendió nada"); return; }
@@ -500,8 +510,8 @@ export default function Hud() {
       } else {
         await preguntarAMate(dicho);
       }
-    } catch {
-      push("err", "No se pudo transcribir el audio");
+    } catch (e) {
+      push("err", `Transcripción fallida — ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setTranscribing(false);
     }
