@@ -101,14 +101,24 @@ export default function Calendar() {
   const conectarGoogle = async () => {
     if (!token) return;
     setConnMsg("");
+    // La ventana se abre YA, dentro del clic: si esperamos al fetch el
+    // navegador pierde el gesto del usuario y bloquea la emergente.
+    const win = window.open("about:blank", "mate_calendar_oauth", "width=520,height=680");
     try {
       const res = await fetch("/api/v1/calendar/connect/google", {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (!res.ok || !data.url) { setConnMsg(data.detail || "No se pudo iniciar la conexión"); return; }
-      const win = window.open(data.url, "mate_calendar_oauth", "width=520,height=680");
-      if (!win) { setConnMsg("El navegador bloqueó la ventana emergente. Permitila y reintentá."); return; }
+      if (!res.ok || !data.url) { win?.close(); setConnMsg(data.detail || "No se pudo iniciar la conexión"); return; }
+
+      if (win) {
+        win.location.href = data.url;
+      } else {
+        // Sin ventana emergente seguimos en la misma pestaña: el callback
+        // devuelve a /calendar al terminar.
+        window.location.href = data.url;
+        return;
+      }
       // La ventana avisa al terminar; si el usuario la cierra a mano, el
       // intervalo igual recarga la lista.
       const onMsg = (e: MessageEvent) => {
@@ -123,6 +133,7 @@ export default function Calendar() {
         }
       }, 800);
     } catch {
+      win?.close();
       setConnMsg("Error de red");
     }
   };
