@@ -85,6 +85,10 @@ const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "o
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/* Voces masculinas en español que instalan Windows y Edge. La API no expone
+   el género, así que la única vía es reconocerlas por nombre. */
+const MASCULINAS = ["Pablo", "Raul", "Raúl", "Jorge", "Alvaro", "Álvaro", "Tomas", "Tomás", "Dario", "Darío"];
+
 /* El token se lee de localStorage en el momento del envío. Tomarlo de una
    variable de estado lo expone a quedar capturado en un closure viejo, que
    es como el POST de transcripción terminó saliendo con "Bearer null". */
@@ -234,7 +238,8 @@ export default function Hud() {
   const [inLevel, setInLevel] = useState(0);
   const [outLevel, setOutLevel] = useState(0);
   const [speaking, setSpeaking] = useState(false);
-  const [voiceName, setVoiceName] = useState("");
+  const [voces, setVoces] = useState<SpeechSynthesisVoice[]>([]);
+  const [vozURI, setVozURI] = useState("");
 
   const push = useCallback((kind: LogKind, text: string) => {
     const d = new Date();
@@ -676,8 +681,8 @@ export default function Hud() {
 
     const u = new SpeechSynthesisUtterance(limpio);
     u.lang = "es-AR";
-    const voz = window.speechSynthesis.getVoices().find((v) => v.lang.startsWith("es"));
-    if (voz) { u.voice = voz; setVoiceName(voz.name); }
+    const voz = window.speechSynthesis.getVoices().find((v) => v.voiceURI === vozURI);
+    if (voz) { u.voice = voz; u.lang = voz.lang; }
 
     u.onstart = () => setSpeaking(true);
     u.onboundary = () => {
@@ -699,6 +704,32 @@ export default function Hud() {
     push("ok", "Probando canal de salida");
     hablar("Consola MATE. Canal de salida verificado. Todos los sistemas responden.");
   };
+
+  /* ── Voces disponibles ──────────────────────────────────────────────
+     getVoices() suele venir vacío en la primera llamada: el navegador las
+     carga de forma asíncrona y avisa por voiceschanged. */
+  useEffect(() => {
+    const cargar = () => {
+      const es = window.speechSynthesis.getVoices().filter((v) => v.lang.startsWith("es"));
+      if (!es.length) return;
+      setVoces(es);
+      setVozURI((actual) => {
+        if (actual && es.some((v) => v.voiceURI === actual)) return actual;
+        const guardada = localStorage.getItem("mate_voz");
+        if (guardada && es.some((v) => v.voiceURI === guardada)) return guardada;
+        // Sin preferencia previa, arranca con una voz masculina si la hay.
+        const masculina = es.find((v) => MASCULINAS.some((n) => v.name.includes(n)));
+        return (masculina ?? es[0]).voiceURI;
+      });
+    };
+    cargar();
+    window.speechSynthesis?.addEventListener("voiceschanged", cargar);
+    return () => window.speechSynthesis?.removeEventListener("voiceschanged", cargar);
+  }, []);
+
+  useEffect(() => {
+    if (vozURI) localStorage.setItem("mate_voz", vozURI);
+  }, [vozURI]);
 
   // Espejos para el bucle de audio
   useEffect(() => { hablandoRef.current = speaking; }, [speaking]);
@@ -1061,7 +1092,22 @@ export default function Hud() {
                 </div>
                 <Vu level={outLevel} />
                 <div style={S.db}>
-                  <span>Síntesis de voz — {voiceName || "voz del sistema"}</span>
+                  {voces.length ? (
+                    <select
+                      value={vozURI}
+                      onChange={(e) => setVozURI(e.target.value)}
+                      aria-label="Voz de MATE"
+                      style={S.select}
+                    >
+                      {voces.map((v) => (
+                        <option key={v.voiceURI} value={v.voiceURI}>
+                          {v.name} · {v.lang}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span>Sin voces en español instaladas</span>
+                  )}
                   <span>actividad</span>
                 </div>
               </div>
@@ -1391,6 +1437,10 @@ const S: Record<string, CSSProperties> = {
   },
   said: { margin: 0, fontSize: 13, color: "#6E8090" },
   reply: { margin: 0, fontSize: 14, color: "#C6D3DE", lineHeight: 1.5 },
+  select: {
+    background: "#141C25", border: "1px solid #2A3946", color: "#6E8090",
+    fontFamily: MONO, fontSize: 11, padding: "2px 5px", maxWidth: 230, cursor: "pointer",
+  },
   winBtn: {
     background: "transparent", border: "1px solid transparent", color: "#6E8090",
     width: 26, height: 22, display: "grid", placeItems: "center", cursor: "pointer", padding: 0,
