@@ -85,6 +85,11 @@ const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "o
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/* El token se lee de localStorage en el momento del envío. Tomarlo de una
+   variable de estado lo expone a quedar capturado en un closure viejo, que
+   es como el POST de transcripción terminó saliendo con "Bearer null". */
+const bearer = () => `Bearer ${typeof window !== "undefined" ? localStorage.getItem("mate_token") ?? "" : ""}`;
+
 /* La maquetación vive acá y no en los objetos inline: las media queries no
    existen en `style`, y sin ellas la consola no se adapta a pantallas chicas. */
 const HUD_CSS = `
@@ -252,7 +257,7 @@ export default function Hud() {
 
   const authFetch = useCallback(
     async (path: string) => {
-      const res = await fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_URL}${path}`, { headers: { Authorization: bearer() } });
       if (!res.ok) throw new Error(`${res.status}`);
       return res.json();
     },
@@ -494,7 +499,7 @@ export default function Hud() {
       fd.append("language", "es-AR");
       const res = await fetch(`${API_URL}/api/v1/transcribe`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: bearer() },
         body: fd,
       });
       if (!res.ok) {
@@ -598,7 +603,7 @@ export default function Hud() {
     try {
       const res = await fetch(`${API_URL}/api/v1/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: bearer() },
         body: JSON.stringify({
           messages: [{ role: "user", content: pregunta }],
           conversation_id: hudConv.current,
