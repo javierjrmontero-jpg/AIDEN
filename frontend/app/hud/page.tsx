@@ -99,6 +99,8 @@ const HUD_CSS = `
 .hud-mandos{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
 
 .hud-root button:focus-visible { outline:2px solid #3FBFB0; outline-offset:1px; }
+.hud-rail button:hover { border-color:#2A3946; color:#C6D3DE; }
+.hud-rail [data-tauri-drag-region] { cursor:default; }
 .hud-root ::-webkit-scrollbar { width:8px; height:8px; }
 .hud-root ::-webkit-scrollbar-thumb { background:#2A3946; }
 .hud-root ::-webkit-scrollbar-track { background:transparent; }
@@ -122,6 +124,50 @@ const HUD_CSS = `
   }
 }
 `;
+
+/* ── Ventana nativa ─────────────────────────────────────────────────
+   La app de escritorio corre sin marco, así que la consola tiene que
+   aportar el arrastre y los controles. En el navegador no existe
+   `__TAURI__` y todo esto simplemente no se muestra. */
+
+interface TauriWin {
+  minimize: () => Promise<void>;
+  toggleMaximize: () => Promise<void>;
+  close: () => Promise<void>;
+}
+
+function ventanaNativa(): TauriWin | null {
+  if (typeof window === "undefined") return null;
+  const t = (window as unknown as {
+    __TAURI__?: { window?: { getCurrentWindow?: () => TauriWin } };
+  }).__TAURI__;
+  return t?.window?.getCurrentWindow?.() ?? null;
+}
+
+function ControlesVentana() {
+  const [nativa, setNativa] = useState<TauriWin | null>(null);
+
+  // Se resuelve tras montar: en SSR no hay window, y el global de Tauri
+  // se inyecta antes del script de la página pero no durante el prerender.
+  useEffect(() => setNativa(ventanaNativa()), []);
+  if (!nativa) return null;
+
+  const B = ({ onClick, label, d }: { onClick: () => void; label: string; d: string }) => (
+    <button onClick={onClick} aria-label={label} title={label} style={S.winBtn}>
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+        <path d={d} stroke="currentColor" strokeWidth="1.2" fill="none" />
+      </svg>
+    </button>
+  );
+
+  return (
+    <div style={{ display: "flex", gap: 2, marginLeft: 8 }}>
+      <B onClick={() => nativa.minimize()} label="Minimizar" d="M1 5h8" />
+      <B onClick={() => nativa.toggleMaximize()} label="Maximizar" d="M1.5 1.5h7v7h-7z" />
+      <B onClick={() => nativa.close()} label="Cerrar" d="M1.5 1.5l7 7M8.5 1.5l-7 7" />
+    </div>
+  );
+}
 
 function relTime(then: Date, now: Date): string {
   const s = Math.max(0, Math.floor((now.getTime() - then.getTime()) / 1000));
@@ -157,17 +203,23 @@ export default function Hud() {
   const stream = useRef<MediaStream | null>(null);
   const [transcribing, setTranscribing] = useState(false);
 
-  // Detección de voz en el navegador: corta sola al terminar de hablar para
-  // no seguir grabando ambiente, que es lo que hace alucinar a Whisper.
-  const hablo = useRef(false);
+  // Detección de voz en el navegador: abre la captura al detectar habla y la
+  // cierra tras el silencio, para no transcribir ambiente.
   const ultimoSonido = useRef(0);
   const inicioGrab = useRef(0);
+  const inicioVoz = useRef(0);
+  // El bucle de audio corre fuera de React: lee estos espejos, no el estado.
+  const hablandoRef = useRef(false);
+  const ocupadoRef = useRef(false);
+  const [capturando, setCapturando] = useState(false);
+  const [escuchaContinua, setEscuchaContinua] = useState(false);
   const [said, setSaid] = useState("");
   const [reply, setReply] = useState("");
   const [asking, setAsking] = useState(false);
   const hudConv = useRef<string | null>(null);
 
   const UMBRAL_VOZ = 0.08;      // pico normalizado por encima del ruido de sala
+  const ARRANQUE_MS = 160;      // voz sostenida antes de dar por iniciada la frase
   const SILENCIO_MS = 1500;     // silencio que da por terminada la frase
   const MAX_GRAB_MS = 20000;    // tope duro por si nunca detecta silencio
   const [inLevel, setInLevel] = useState(0);
@@ -344,66 +396,80 @@ export default function Hud() {
     cx.stroke();
   }, [vitals]);
 
-  /* ── Micrófono: mide nivel y además graba para transcribir ───────── */
-  const cerrarMic = useCallback(() => {
+  /* ── Escucha continua ───────────────────────────────────────────────
+     El micrófono queda abierto midiendo nivel, pero NO graba mientras no
+     detecte voz: recién ahí abre el grabador, y lo cierra tras el silencio.
+     Así no se transcribe ambiente ni se manda audio de una sala vacía. */
+
+  const soltarMic = useCallback(() => {
+    try { recorder.current?.stop(); } catch { /* ya detenido */ }
+    recorder.current = null;
     stream.current?.getTracks().forEach((t) => t.stop());
     stream.current = null;
     audioCtx.current?.close();
     audioCtx.current = null;
     analyser.current = null;
-    recorder.current = null;
     setMicOn(false);
+    setCapturando(false);
     setInLevel(0);
   }, []);
 
-  const toggleMic = async () => {
-    if (transcribing) return;
-    if (micOn) {
-      // Detener cierra el grabador; su onstop dispara la transcripción.
-      recorder.current?.stop();
-      setMicOn(false);
-      return;
-    }
+  const abrirMic = useCallback(async (): Promise<boolean> => {
+    if (stream.current) return true;
     try {
       const s = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-      hablo.current = false;
-      ultimoSonido.current = 0;
-      inicioGrab.current = Date.now();
       const ctx = new AudioContext();
       const an = ctx.createAnalyser();
       an.fftSize = 512;
       ctx.createMediaStreamSource(s).connect(an);
-
-      const chunks: Blob[] = [];
-      const mr = new MediaRecorder(s);
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-      mr.onstop = async () => {
-        const huboVoz = hablo.current;
-        cerrarMic();
-        if (!huboVoz) {
-          push("warn", "No se detectó voz — no se envió nada a transcribir");
-          return;
-        }
-        await procesarVoz(new Blob(chunks, { type: "audio/webm" }));
-      };
-      mr.start();
-
       stream.current = s;
       audioCtx.current = ctx;
       analyser.current = an;
-      recorder.current = mr;
       setMicOn(true);
       setMicError("");
-      push("ok", "Escuchando — corta sola al terminar de hablar");
+      return true;
     } catch {
       setMicError("Sin permiso de micrófono");
       push("err", "El navegador denegó el acceso al micrófono");
+      return false;
+    }
+  }, [push]);
+
+  // Arranca una captura. La cierra el detector de silencio del bucle de audio.
+  const iniciarCaptura = useCallback(() => {
+    const s = stream.current;
+    if (!s || recorder.current) return;
+
+    const chunks: Blob[] = [];
+    const mr = new MediaRecorder(s);
+    mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    mr.onstop = async () => {
+      recorder.current = null;
+      setCapturando(false);
+      await procesarVoz(new Blob(chunks, { type: "audio/webm" }));
+    };
+    mr.start();
+    recorder.current = mr;
+    inicioGrab.current = Date.now();
+    setCapturando(true);
+    push("net", "Voz detectada — capturando");
+  }, [push]);
+
+  // El orbe: fuerza el corte si ya está capturando, si no alterna la escucha.
+  const toggleMic = async () => {
+    if (transcribing || asking) return;
+    if (recorder.current?.state === "recording") { recorder.current.stop(); return; }
+    if (micOn) {
+      soltarMic();
+      setEscuchaContinua(false);
+      push("ok", "Escucha detenida");
+      return;
+    }
+    if (await abrirMic()) {
+      setEscuchaContinua(true);
+      push("ok", "Escucha continua activa — hablá cuando quieras");
     }
   };
 
@@ -454,18 +520,28 @@ export default function Hud() {
         for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128) / 128);
         setInLevel(peak);
 
-        // Corte automático: espera a que empieces a hablar, y cierra cuando
-        // llevás SILENCIO_MS callado. Sin esto la grabación sigue tomando sala.
+        // Detector: abre la captura con voz sostenida, la cierra con silencio.
+        // Mientras MATE habla no se escucha, o se transcribiría a sí mismo.
         const ahora = Date.now();
-        if (peak > UMBRAL_VOZ) {
-          hablo.current = true;
+        const hayVoz = peak > UMBRAL_VOZ;
+        if (hayVoz) {
           ultimoSonido.current = ahora;
+          if (!inicioVoz.current) inicioVoz.current = ahora;
+        } else if (!recorder.current) {
+          inicioVoz.current = 0;
         }
-        const callado = hablo.current && ahora - ultimoSonido.current > SILENCIO_MS;
-        const pasado = ahora - inicioGrab.current > MAX_GRAB_MS;
-        if ((callado || pasado) && recorder.current?.state === "recording") {
-          recorder.current.stop();
-          setMicOn(false);
+
+        const grabando = recorder.current?.state === "recording";
+        if (!grabando) {
+          const sostenida = inicioVoz.current && ahora - inicioVoz.current > ARRANQUE_MS;
+          if (sostenida && !hablandoRef.current && !ocupadoRef.current) iniciarCaptura();
+        } else {
+          const callado = ahora - ultimoSonido.current > SILENCIO_MS;
+          const pasado = ahora - inicioGrab.current > MAX_GRAB_MS;
+          if (callado || pasado) {
+            inicioVoz.current = 0;
+            recorder.current?.stop();
+          }
         }
 
         const cx = cv.getContext("2d");
@@ -604,9 +680,35 @@ export default function Hud() {
     hablar("Consola MATE. Canal de salida verificado. Todos los sistemas responden.");
   };
 
+  // Espejos para el bucle de audio
+  useEffect(() => { hablandoRef.current = speaking; }, [speaking]);
+  useEffect(() => { ocupadoRef.current = transcribing || asking; }, [transcribing, asking]);
+
+  /* Arranque: la consola escucha desde que abre, salvo que lo hayas
+     apagado antes. El permiso ya concedido no se vuelve a pedir. */
+  useEffect(() => {
+    if (!token) return;
+    if (localStorage.getItem("mate_escucha") === "off") {
+      push("ok", "Escucha apagada — tocá el orbe para activarla");
+      return;
+    }
+    abrirMic().then((ok) => {
+      if (ok) {
+        setEscuchaContinua(true);
+        push("ok", "Escucha continua activa — hablá cuando quieras");
+      }
+    });
+  }, [token, abrirMic, push]);
+
+  // Recordar la preferencia entre sesiones
+  useEffect(() => {
+    if (!token) return;
+    localStorage.setItem("mate_escucha", escuchaContinua ? "on" : "off");
+  }, [escuchaContinua, token]);
+
   /* Al salir de la consola hay que soltar el micrófono, o el navegador
      sigue mostrando la pestaña como grabando. */
-  useEffect(() => cerrarMic, [cerrarMic]);
+  useEffect(() => soltarMic, [soltarMic]);
 
   /* ── Auto-scroll del registro ───────────────────────────────────── */
   useEffect(() => {
@@ -675,7 +777,8 @@ export default function Hud() {
   const orbState: OrbState =
     speaking ? "speaking"
     : asking || transcribing ? "thinking"
-    : micOn ? "listening"
+    : capturando ? "listening"
+    : micOn ? "armed"
     : "idle";
   const orbLevel = speaking ? outLevel : micOn ? inLevel : 0;
 
@@ -710,7 +813,7 @@ export default function Hud() {
 
       <div className="hud-root">
         {/* RIEL */}
-        <header className="hud-rail" style={S.rail}>
+        <header className="hud-rail" data-tauri-drag-region style={S.rail}>
           <div style={S.mark}>
             <b style={S.markB}>MATE</b>
             <span style={S.markS}>Consola de mando</span>
@@ -721,6 +824,7 @@ export default function Hud() {
             <div style={S.clock}>{pad(now.getHours())}:{pad(now.getMinutes())}:{pad(now.getSeconds())}</div>
             <div style={S.clockSub}>{DIAS[now.getDay()]} {now.getDate()} {MESES[now.getMonth()]}</div>
           </div>
+          <ControlesVentana />
         </header>
 
         {/* REJILLA */}
@@ -900,7 +1004,11 @@ export default function Hud() {
           <h2 style={S.h2}>
             Entrada / salida de audio
             <span style={S.tag}>
-              {micError || (transcribing ? "transcribiendo" : micOn ? "escuchando" : "en reposo")}
+              {micError
+                || (transcribing ? "transcribiendo"
+                  : capturando ? "capturando"
+                  : micOn ? "escucha continua"
+                  : "apagado")}
             </span>
           </h2>
           <div className="hud-body" style={S.body}>
@@ -908,14 +1016,17 @@ export default function Hud() {
               <div style={{ display: "grid", gap: 7 }}>
                 <div style={S.chanHd}>
                   Entrada
-                  <button onClick={toggleMic} disabled={transcribing} style={S.micBtn}>
-                    {transcribing ? "Transcribiendo…" : micOn ? "Enviar" : "Hablar"}
+                  <button onClick={toggleMic} disabled={transcribing || asking} style={S.micBtn}>
+                    {transcribing ? "Transcribiendo…"
+                      : capturando ? "Cortar y enviar"
+                      : micOn ? "Apagar escucha"
+                      : "Activar escucha"}
                   </button>
                 </div>
                 <Vu level={inLevel} />
                 <div style={S.db}>
                   <span>«tareas», «agenda», «documento» abren la pantalla</span>
-                  <span>lo demás va al chat</span>
+                  <span>lo demás lo responde MATE</span>
                 </div>
               </div>
 
@@ -979,10 +1090,11 @@ export default function Hud() {
    No es decoración: el radio del núcleo sigue el nivel real de audio y
    cada estado tiene su propio comportamiento. */
 
-type OrbState = "idle" | "listening" | "thinking" | "speaking";
+type OrbState = "idle" | "armed" | "listening" | "thinking" | "speaking";
 
 const ORB_LABEL: Record<OrbState, string> = {
   idle: "en espera",
+  armed: "en escucha",
   listening: "escuchando",
   thinking: "procesando",
   speaking: "respondiendo",
@@ -1029,7 +1141,7 @@ function Orb({ state, level }: { state: OrbState; level: number }) {
       const n = nivel.current;
 
       const respira = quieto ? 0 : Math.sin(t * 0.03) * 0.5 + 0.5;
-      const activo = state !== "idle";
+      const activo = state === "listening" || state === "speaking" || state === "thinking";
 
       // Halo
       const halo = cx.createRadialGradient(cxp, cyp, base * 0.1, cxp, cyp, base);
@@ -1259,6 +1371,10 @@ const S: Record<string, CSSProperties> = {
   },
   said: { margin: 0, fontSize: 13, color: "#6E8090" },
   reply: { margin: 0, fontSize: 14, color: "#C6D3DE", lineHeight: 1.5 },
+  winBtn: {
+    background: "transparent", border: "1px solid transparent", color: "#6E8090",
+    width: 26, height: 22, display: "grid", placeItems: "center", cursor: "pointer", padding: 0,
+  },
   orbBtn: {
     background: "transparent", border: "none", padding: 0,
     cursor: "pointer", display: "block", font: "inherit",
