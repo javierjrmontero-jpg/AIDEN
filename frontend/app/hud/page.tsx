@@ -217,6 +217,10 @@ export default function Hud() {
   const [reply, setReply] = useState("");
   const [asking, setAsking] = useState(false);
   const hudConv = useRef<string | null>(null);
+  // `iniciarCaptura` es estable, asi que su onstop captura el closure del
+  // primer render, cuando todavia no habia token. Va por ref para que
+  // siempre invoque la version actual.
+  const procesarVozRef = useRef<(b: Blob) => Promise<void>>(async () => {});
 
   const UMBRAL_VOZ = 0.08;      // pico normalizado por encima del ruido de sala
   const ARRANQUE_MS = 160;      // voz sostenida antes de dar por iniciada la frase
@@ -448,7 +452,7 @@ export default function Hud() {
     mr.onstop = async () => {
       recorder.current = null;
       setCapturando(false);
-      await procesarVoz(new Blob(chunks, { type: "audio/webm" }));
+      await procesarVozRef.current(new Blob(chunks, { type: "audio/webm" }));
     };
     mr.start();
     recorder.current = mr;
@@ -516,6 +520,7 @@ export default function Hud() {
       setTranscribing(false);
     }
   };
+  procesarVozRef.current = procesarVoz;
 
   useEffect(() => {
     if (!micOn) return;
