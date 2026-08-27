@@ -777,14 +777,29 @@ export default function Hud() {
 
   /* ── Mandos ─────────────────────────────────────────────────────── */
   // El briefing no tiene pantalla propia: se ejecuta acá y reporta en el registro.
+  // El briefing se muestra y se lee, como cualquier respuesta hablada: es
+  // contenido para consumir, no un evento del registro.
   const runBriefing = async () => {
+    setAsking(true);
+    setSaid("Briefing del día");
+    setReply("");
     push("net", "Componiendo briefing del día…");
     try {
       const b = await authFetch("/api/v1/briefing");
-      const texto = typeof b === "string" ? b : b.briefing || b.summary || "";
-      push("ok", texto ? `Briefing listo — ${texto.slice(0, 90)}…` : "Briefing listo, sin contenido");
+      const texto = (typeof b === "string" ? b : b.text || "").trim();
+      if (!texto) {
+        push("warn", "El briefing salió vacío");
+        setReply("No hay nada para informar todavía.");
+        return;
+      }
+      setReply(texto);
+      push("ok", "Briefing listo");
+      hablar(texto);
     } catch {
       push("err", "No se pudo componer el briefing");
+      setReply("No se pudo componer el briefing.");
+    } finally {
+      setAsking(false);
     }
   };
 
@@ -1033,7 +1048,16 @@ export default function Hud() {
             </section>
 
             <section style={S.panel}>
-              <h2 style={S.h2}>Bóveda<span style={S.tag}>en vivo</span></h2>
+              <h2 style={S.h2}>
+                Bóveda
+                <button
+                  onClick={() => router.push("/documents")}
+                  style={{ ...S.tag, background: "transparent", border: "none", cursor: "pointer" }}
+                  title="Abrir documentos"
+                >
+                  abrir →
+                </button>
+              </h2>
               <div className="hud-body" style={S.body}>
                 <div style={S.vaultNums}>
                   <VNum k="Documentos" v={vault?.documents ?? 0} d="en la bóveda" />
@@ -1440,14 +1464,14 @@ const S: Record<string, CSSProperties> = {
   },
   exchange: {
     marginTop: 12, paddingTop: 12, borderTop: "1px solid #1D2833",
-    display: "grid", gap: 6, maxHeight: 130, overflow: "auto",
+    display: "grid", gap: 6, maxHeight: 200, overflow: "auto",
   },
   who: {
     fontSize: 10, letterSpacing: ".16em", textTransform: "uppercase",
     color: "#45545F", marginRight: 10,
   },
   said: { margin: 0, fontSize: 13, color: "#6E8090" },
-  reply: { margin: 0, fontSize: 14, color: "#C6D3DE", lineHeight: 1.5 },
+  reply: { margin: 0, fontSize: 14, color: "#C6D3DE", lineHeight: 1.6, whiteSpace: "pre-wrap" },
   select: {
     background: "#141C25", border: "1px solid #2A3946", color: "#6E8090",
     fontFamily: MONO, fontSize: 11, padding: "2px 5px", maxWidth: 230, cursor: "pointer",
