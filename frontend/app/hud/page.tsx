@@ -257,7 +257,10 @@ export default function Hud() {
     window.speechSynthesis?.cancel();
     localStorage.removeItem("mate_token");
     localStorage.removeItem("mate_user");
-    router.replace("/login");
+    // Navegación dura y no router.replace: la consola deja intervalos, un
+    // bucle de audio y un stream abiertos que sobreviven a una transición
+    // del lado del cliente. Cerrar sesión tiene que descartar todo el estado.
+    window.location.replace("/login");
   };
 
   /* ── Sesión ─────────────────────────────────────────────────────── */

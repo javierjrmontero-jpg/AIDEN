@@ -108,7 +108,9 @@ useEffect(() => {
   const logout = () => {
     localStorage.removeItem("mate_token");
     localStorage.removeItem("mate_user");
-    router.push("/login");
+    // Igual que en la consola: navegación dura para descartar el estado y no
+    // dejar la sesión anterior en el historial.
+    window.location.replace("/login");
   };
 
   useEffect(() => {
