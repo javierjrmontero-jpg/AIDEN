@@ -252,6 +252,14 @@ export default function Hud() {
     });
   }, []);
 
+  const salir = () => {
+    soltarMic();
+    window.speechSynthesis?.cancel();
+    localStorage.removeItem("mate_token");
+    localStorage.removeItem("mate_user");
+    router.replace("/login");
+  };
+
   /* ── Sesión ─────────────────────────────────────────────────────── */
   useEffect(() => {
     const t = localStorage.getItem("mate_token");
@@ -871,6 +879,9 @@ export default function Hud() {
           </div>
           <div style={{ flex: 1 }} />
           <button onClick={() => router.push("/")} style={S.back}>Ir al chat →</button>
+          <button onClick={salir} style={{ ...S.back, color: "#45545F" }} title="Cerrar sesión">
+            Salir
+          </button>
           <div style={S.clockWrap}>
             <div style={S.clock}>{pad(now.getHours())}:{pad(now.getMinutes())}:{pad(now.getSeconds())}</div>
             <div style={S.clockSub}>{DIAS[now.getDay()]} {now.getDate()} {MESES[now.getMonth()]}</div>

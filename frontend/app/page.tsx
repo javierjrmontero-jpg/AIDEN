@@ -617,6 +617,13 @@ if (ttsEnabled) {
           <div className="flex items-center gap-3 ml-auto">
             <span className="text-xs text-gray-500 hidden md:inline">Motor de Asistencia Técnica e Inteligencia by JJRM</span>
             <span className="text-xs text-blue-400 font-medium">{user.name}</span>
+            <button
+              onClick={() => router.push("/hud")}
+              title="Volver a la consola"
+              className="text-xs text-gray-400 hover:text-emerald-400 transition-colors flex items-center gap-1.5"
+            >
+              <span>🛰️</span><span className="hidden sm:inline">Consola</span>
+            </button>
             <button onClick={logout} className="text-xs text-gray-500 hover:text-red-400 transition-colors">Salir</button>
           </div>
         </div>
