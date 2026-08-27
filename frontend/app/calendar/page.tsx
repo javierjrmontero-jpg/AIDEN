@@ -98,14 +98,14 @@ export default function Calendar() {
   }, [router, loadAccounts]);
 
   // Alta desde la interfaz: no expone el secreto de la app ni exige script.
-  const conectarGoogle = async () => {
+  const conectar = async (proveedor: "google" | "microsoft") => {
     if (!token) return;
     setConnMsg("");
     // La ventana se abre YA, dentro del clic: si esperamos al fetch el
     // navegador pierde el gesto del usuario y bloquea la emergente.
-    const win = window.open("about:blank", "mate_calendar_oauth", "width=520,height=680");
+    const win = window.open("about:blank", "mate_calendar_oauth", "width=560,height=700");
     try {
-      const res = await fetch("/api/v1/calendar/connect/google", {
+      const res = await fetch(`/api/v1/calendar/connect/${proveedor}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -359,7 +359,16 @@ export default function Calendar() {
                 <div className="space-y-2">
                   {accounts.map((a) => (
                     <div key={a.id} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
-                      <span className="text-xs text-gray-200">{a.google_email}</span>
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                          a.provider === "microsoft"
+                            ? "bg-[#2F2F2F] text-gray-300"
+                            : "bg-emerald-900 text-emerald-400"
+                        }`}>
+                          {a.provider === "microsoft" ? "Outlook" : "Google"}
+                        </span>
+                        <span className="text-xs text-gray-200 truncate">{a.google_email}</span>
+                      </span>
                       <button
                         onClick={() => deleteAccount(a.id)}
                         className="text-xs text-red-400 hover:text-red-300"
@@ -375,15 +384,23 @@ export default function Calendar() {
             <div className="pt-3 border-t border-gray-800">
               <h2 className="text-sm font-semibold text-gray-100 mb-2">Conectar nueva cuenta</h2>
               <p className="text-xs text-gray-500 mb-3 leading-relaxed">
-                Autorizá tu cuenta de Google. Se abre una ventana de Google, elegís
-                la cuenta y volvés acá — cada usuario conecta su propia agenda.
+                Autorizá tu cuenta. Se abre una ventana del proveedor, elegís la cuenta
+                y volvés acá — cada usuario conecta su propia agenda.
               </p>
-              <button
-                onClick={conectarGoogle}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm transition-colors"
-              >
-                Conectar Google Calendar
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => conectar("google")}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm transition-colors"
+                >
+                  Conectar Google Calendar
+                </button>
+                <button
+                  onClick={() => conectar("microsoft")}
+                  className="px-4 py-2 bg-[#2F2F2F] hover:bg-[#1a1a1a] rounded-lg text-sm transition-colors"
+                >
+                  Conectar Outlook
+                </button>
+              </div>
               {connMsg && <p className="text-xs text-gray-400 mt-2">{connMsg}</p>}
 
               <details className="mt-5">

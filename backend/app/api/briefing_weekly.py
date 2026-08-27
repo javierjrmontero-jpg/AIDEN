@@ -22,7 +22,7 @@ from app.models.user import User
 from app.models.calendar_config import CalendarConfig
 from app.models.email_config import EmailConfig
 from app.models.task import Task
-from app.services.calendar.service import list_events_range
+from app.services.calendar.router import list_events_range
 from app.services.email.service import fetch_inbox, send_email
 
 router = APIRouter()

@@ -29,6 +29,7 @@ from app.core.config import settings
 from app.core.database import get_db, AsyncSessionLocal
 from app.models.calendar_config import CalendarConfig
 from app.models.user import User
+from app.services.calendar import graph as ms_graph
 from app.services.calendar.service import get_account_email
 
 router = APIRouter()
@@ -42,6 +43,10 @@ _GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
 _GOOGLE_REDIRECT = f"{_BASE}/api/v1/calendar/connect/google/callback"
 _GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar openid email"
+
+_MS_AUTH = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+_MS_TOKEN = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+_MS_REDIRECT = f"{_BASE}/api/v1/calendar/connect/microsoft/callback"
 
 
 def _make_state(user_id: str) -> str:
@@ -158,4 +163,82 @@ async def google_connect_callback(code: str = None, state: str = None, error: st
         await db.commit()
 
     logger.info(f"Calendario conectado para {email}")
+    return _cerrar(f"Calendario de {email} conectado.")
+
+
+# ── Microsoft / Outlook ──────────────────────────────────────────────────────
+
+@router.get("/calendar/connect/microsoft")
+async def microsoft_connect_url(current_user: User = Depends(get_current_user)):
+    params = urlencode({
+        "client_id": settings.MICROSOFT_CLIENT_ID,
+        "redirect_uri": _MS_REDIRECT,
+        "response_type": "code",
+        "response_mode": "query",
+        "scope": ms_graph.SCOPES,
+        "state": _make_state(current_user.id),
+        "prompt": "consent",
+    })
+    return {"url": f"{_MS_AUTH}?{params}"}
+
+
+@router.get("/calendar/connect/microsoft/callback", response_class=HTMLResponse)
+async def microsoft_connect_callback(code: str = None, state: str = None, error: str = None):
+    if error or not code:
+        return _cerrar("Autorización cancelada.", ok=False)
+
+    user_id = _read_state(state or "")
+    if not user_id:
+        logger.warning("Calendario Outlook: state inválido o expirado")
+        return _cerrar("El enlace expiró. Volvé a intentarlo.", ok=False)
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.post(_MS_TOKEN, data={
+            "client_id": settings.MICROSOFT_CLIENT_ID,
+            "client_secret": settings.MICROSOFT_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": _MS_REDIRECT,
+            "grant_type": "authorization_code",
+            "scope": ms_graph.SCOPES,
+        })
+    if resp.status_code != 200:
+        logger.error(f"Calendario Outlook: canje de código falló — {resp.text[:300]}")
+        return _cerrar("Microsoft rechazó la autorización.", ok=False)
+
+    refresh_token = resp.json().get("refresh_token")
+    if not refresh_token:
+        # Falta offline_access en los permisos de la app registrada en Azure.
+        return _cerrar("Microsoft no devolvió un token de actualización.", ok=False)
+
+    try:
+        email = await ms_graph.get_account_email(refresh_token)
+    except Exception as ex:
+        logger.error(f"Calendario Outlook: el token no sirve para leer el calendario — {ex}")
+        return _cerrar("No se pudo leer el calendario con esa cuenta.", ok=False)
+
+    async with AsyncSessionLocal() as db:
+        row = await db.execute(
+            select(CalendarConfig)
+            .where(CalendarConfig.user_id == user_id)
+            .where(CalendarConfig.google_email == email)
+        )
+        existente = row.scalar_one_or_none()
+        if existente:
+            existente.refresh_token = refresh_token
+            existente.provider = "microsoft"
+            existente.client_kind = "web"
+            existente.enabled = True
+        else:
+            db.add(CalendarConfig(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                provider="microsoft",
+                google_email=email,
+                refresh_token=refresh_token,
+                client_kind="web",
+                calendar_id="primary",
+            ))
+        await db.commit()
+
+    logger.info(f"Calendario de Outlook conectado para {email}")
     return _cerrar(f"Calendario de {email} conectado.")

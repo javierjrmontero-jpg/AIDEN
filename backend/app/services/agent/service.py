@@ -14,7 +14,7 @@ from app.services.memory.service import get_memories
 from app.services.email.service import send_email
 from app.models.task import Task
 from app.models.email_config import EmailConfig
-from app.services.calendar.service import list_upcoming_events, create_event, format_events_for_prompt
+from app.services.calendar.router import list_upcoming_events, create_event, format_events_for_prompt
 from app.models.calendar_config import CalendarConfig
 from app.services.audit.service import write_audit
 

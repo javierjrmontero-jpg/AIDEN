@@ -221,7 +221,7 @@ async def stream_chat(messages: list, user=None, db=None, voice: bool = False):
         try:
             from sqlalchemy import select
             from app.models.calendar_config import CalendarConfig
-            from app.services.calendar.service import list_upcoming_events, format_events_for_prompt
+            from app.services.calendar.router import list_upcoming_events, format_events_for_prompt
             result = await db.execute(
                 select(CalendarConfig)
                 .where(CalendarConfig.user_id == user.id)
