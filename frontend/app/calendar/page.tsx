@@ -59,6 +59,7 @@ export default function Calendar() {
   const [end, setEnd] = useState("");
   const [location, setLocation] = useState("");
   const [description, setDescription] = useState("");
+  const [targetAccount, setTargetAccount] = useState("");
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState("");
 
@@ -89,6 +90,14 @@ export default function Calendar() {
       console.error(e);
     }
   }, [days, loadEvents]);
+
+  // Un <select> sin valor manda "" y el backend caeria al primer calendario:
+  // preseleccionamos para que lo elegido y lo enviado coincidan siempre.
+  useEffect(() => {
+    if (accounts.length && !accounts.some((a) => a.id === targetAccount)) {
+      setTargetAccount(accounts[0].id);
+    }
+  }, [accounts, targetAccount]);
 
   useEffect(() => {
     const t = localStorage.getItem("mate_token");
@@ -182,6 +191,7 @@ export default function Calendar() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           summary, start, end: end || "", location, description,
+          ...(targetAccount ? { account_id: targetAccount } : {}),
         }),
       });
       const data = await res.json();
@@ -300,7 +310,7 @@ export default function Calendar() {
                             rel="noopener noreferrer"
                             className="text-xs text-emerald-500 hover:text-emerald-400 mt-2 inline-block"
                           >
-                            Abrir en Google →
+                            Abrir en el calendario →
                           </a>
                         )}
                       </div>
@@ -315,6 +325,22 @@ export default function Calendar() {
         {/* CREAR */}
         {tab === "create" && (
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-3 max-w-xl">
+            {accounts.length > 1 && (
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Agenda destino *</label>
+                <select
+                  className={input}
+                  value={targetAccount}
+                  onChange={(e) => setTargetAccount(e.target.value)}
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.provider === "microsoft" ? "Outlook" : "Google"} — {a.google_email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="text-xs text-gray-500 mb-1 block">Título *</label>
               <input className={input} value={summary} onChange={(e) => setSummary(e.target.value)} />

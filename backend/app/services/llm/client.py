@@ -227,10 +227,12 @@ async def stream_chat(messages: list, user=None, db=None, voice: bool = False):
                 .where(CalendarConfig.user_id == user.id)
                 .where(CalendarConfig.enabled == True)
             )
-            cal_config = result.scalar_one_or_none()
-            if cal_config:
-                events = await list_upcoming_events(cal_config, max_results=5, days_ahead=7)
-                calendar_text = format_events_for_prompt(events)
+            eventos = []
+            for cal_config in result.scalars().all():
+                eventos.extend(await list_upcoming_events(cal_config, max_results=5, days_ahead=7))
+            if eventos:
+                eventos.sort(key=lambda e: e.get("start") or "")
+                calendar_text = format_events_for_prompt(eventos)
         except Exception as e:
             logger.error(f"Error cargando calendario: {e}")
 

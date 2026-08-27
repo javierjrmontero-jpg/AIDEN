@@ -145,14 +145,14 @@ async def prioritize_tasks(
             .where(CalendarConfig.user_id == current_user.id)
             .where(CalendarConfig.enabled == True)
         )
-        cal_cfg = cal_result.scalar_one_or_none()
-        if cal_cfg:
-            events = await list_events_range(
+        for cal_cfg in cal_result.scalars().all():
+            events.extend(await list_events_range(
                 cal_cfg,
                 time_min=now.isoformat(),
                 time_max=(now + timedelta(days=7)).isoformat(),
                 max_results=20,
-            )
+            ))
+        events.sort(key=lambda e: e.get("start") or "")
     except Exception:
         pass
 

@@ -45,9 +45,14 @@ async def get_briefing(
             .where(CalendarConfig.user_id == current_user.id)
             .where(CalendarConfig.enabled == True)
         )
-        cal_cfg = result.scalar_one_or_none()
-        if cal_cfg:
-            events = await list_upcoming_events(cal_cfg, max_results=10, days_ahead=2)
+        # Todas las agendas del usuario, no la primera: scalar_one_or_none
+        # además lanza excepción cuando hay más de una fila.
+        configs = result.scalars().all()
+        events = []
+        for cal_cfg in configs:
+            events.extend(await list_upcoming_events(cal_cfg, max_results=10, days_ahead=2))
+        events.sort(key=lambda e: e.get("start") or "")
+        if configs:
             today_str = now.strftime("%Y-%m-%d")
             tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
             today_events = [e for e in events if e.get("start", "").startswith(today_str)]

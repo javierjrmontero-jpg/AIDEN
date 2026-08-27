@@ -109,7 +109,7 @@ RESEARCH_TOOLS = [
     },
     {
         "name": "create_calendar_event",
-        "description": "Crea un evento en el calendario del usuario.",
+        "description": "Crea un evento en el calendario del usuario. Si hay varias agendas conectadas, indica cual en calendar_account.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -117,7 +117,11 @@ RESEARCH_TOOLS = [
                 "start":       {"type": "string", "description": "ISO 8601, ej: 2026-06-01T18:00:00 (o 2026-06-01 día completo)"},
                 "end":         {"type": "string", "description": "ISO 8601 opcional; por defecto +1h"},
                 "description": {"type": "string"},
-                "location":    {"type": "string"}
+                "location":    {"type": "string"},
+                "calendar_account": {
+                    "type": "string",
+                    "description": "En que agenda crearlo cuando hay varias: 'google', 'outlook' o parte del email."
+                }
             },
             "required": ["summary", "start"]
         }
@@ -147,6 +151,27 @@ _ACCOUNT_ALIASES = {
     "gmail":     ["gmail", "google", "basic"],
     "google":    ["gmail", "google", "basic"],
 }
+
+
+def _cal_label(config) -> str:
+    proveedor = "Outlook" if (config.provider or "google") == "microsoft" else "Google"
+    return f"{proveedor} ({config.google_email})"
+
+
+def _resolve_calendar(configs, pista: str | None):
+    """Elige la agenda por pista textual. None si hay ambiguedad."""
+    if len(configs) == 1:
+        return configs[0]
+    if not pista:
+        return None
+    p = pista.strip().lower()
+    for c in configs:
+        if p in (c.google_email or "").lower():
+            return c
+        proveedor = "outlook" if (c.provider or "google") == "microsoft" else "google"
+        if p in proveedor:
+            return c
+    return None
 
 
 def _account_label(cfg) -> str:
@@ -247,13 +272,23 @@ async def _execute_tool(tool_name: str, tool_input: dict, user, db: AsyncSession
                 .where(CalendarConfig.user_id == user.id)
                 .where(CalendarConfig.enabled == True)
             )
-            cfg = r.scalar_one_or_none()
-            if not cfg:
+            configs = r.scalars().all()
+            if not configs:
                 return "No hay calendario conectado."
-            events = await list_upcoming_events(
-                cfg, max_results=tool_input.get("limit", 10), days_ahead=tool_input.get("days", 7)
-            )
-            return format_events_for_prompt(events)
+            # Para leer se juntan todas las agendas: el usuario piensa en su
+            # dia, no en de que proveedor viene cada evento.
+            eventos = []
+            for cfg in configs:
+                try:
+                    eventos.extend(await list_upcoming_events(
+                        cfg,
+                        max_results=tool_input.get("limit", 10),
+                        days_ahead=tool_input.get("days", 7),
+                    ))
+                except Exception as ex:
+                    logger.error(f"Calendario {_cal_label(cfg)} no respondio: {ex}")
+            eventos.sort(key=lambda e: e.get("start") or "")
+            return format_events_for_prompt(eventos)
 
         elif tool_name == "create_calendar_event":
             r = await db.execute(
@@ -261,9 +296,22 @@ async def _execute_tool(tool_name: str, tool_input: dict, user, db: AsyncSession
                 .where(CalendarConfig.user_id == user.id)
                 .where(CalendarConfig.enabled == True)
             )
-            cfg = r.scalar_one_or_none()
-            if not cfg:
+            configs = r.scalars().all()
+            if not configs:
                 return "Error: no hay calendario conectado."
+
+            cfg = _resolve_calendar(configs, tool_input.get("calendar_account"))
+            if cfg is None:
+                etiquetas = ", ".join(_cal_label(c) for c in configs)
+                if tool_input.get("calendar_account"):
+                    return (f"No encontre la agenda '{tool_input['calendar_account']}'. "
+                            f"Agendas disponibles: {etiquetas}.")
+                # Escribir en la agenda equivocada es molesto de deshacer:
+                # ante ambiguedad se pregunta en vez de elegir por el usuario.
+                return (f"Hay varias agendas conectadas ({etiquetas}). "
+                        f"Preguntale al usuario en cual crear el evento y volve a "
+                        f"llamar la herramienta indicando calendar_account.")
+
             ev = await create_event(
                 cfg,
                 summary=tool_input["summary"],
@@ -272,7 +320,8 @@ async def _execute_tool(tool_name: str, tool_input: dict, user, db: AsyncSession
                 description=tool_input.get("description", ""),
                 location=tool_input.get("location", ""),
             )
-            return f"Evento creado: '{ev['summary']}' el {ev['start']}. {ev.get('html_link','')}"
+            return (f"Evento creado en {_cal_label(cfg)}: '{ev['summary']}' "
+                    f"el {ev['start']}. {ev.get('html_link','')}")
 
         return f"Herramienta '{tool_name}' no reconocida."
 

@@ -82,14 +82,14 @@ async def get_weekly_briefing(
             .where(CalendarConfig.user_id == current_user.id)
             .where(CalendarConfig.enabled == True)
         )
-        cal_cfg = result.scalar_one_or_none()
-        if cal_cfg:
-            events = await list_events_range(
+        for cal_cfg in result.scalars().all():
+            events.extend(await list_events_range(
                 cal_cfg,
                 time_min=week_ago.isoformat(),
                 time_max=now.isoformat(),
                 max_results=50,
-            )
+            ))
+        events.sort(key=lambda e: e.get("start") or "")
     except Exception:
         pass
 
