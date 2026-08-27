@@ -177,7 +177,11 @@ async def microsoft_connect_url(current_user: User = Depends(get_current_user)):
         "response_mode": "query",
         "scope": ms_graph.SCOPES,
         "state": _make_state(current_user.id),
-        "prompt": "consent",
+        # select_account y no consent: con la sesión activa, consent va directo
+        # a la cuenta de organización, que suele exigir aprobación de un
+        # administrador. Microsoft devuelve refresh_token igual, porque lo
+        # gobierna offline_access y no el prompt.
+        "prompt": "select_account",
     })
     return {"url": f"{_MS_AUTH}?{params}"}
 
