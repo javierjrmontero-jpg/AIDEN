@@ -218,6 +218,8 @@ export default function Hud() {
   const inicioGrab = useRef(0);
   const inicioVoz = useRef(0);
   const inicioBarge = useRef(0);
+  const inicioTTS = useRef(0);
+  const ecoPico = useRef(0);
   // El bucle de audio corre fuera de React: lee estos espejos, no el estado.
   const hablandoRef = useRef(false);
   const ocupadoRef = useRef(false);
@@ -236,8 +238,13 @@ export default function Hud() {
   const ARRANQUE_MS = 160;      // voz sostenida antes de dar por iniciada la frase
   const SILENCIO_MS = 1500;     // silencio que da por terminada la frase
   const MAX_GRAB_MS = 20000;    // tope duro por si nunca detecta silencio
-  const UMBRAL_BARGE = 0.18;    // interrumpir exige hablar más fuerte que el eco del TTS
-  const BARGE_MS = 300;         // sostenido, para que un ruido suelto no corte la respuesta
+  // Barge-in: el umbral se calibra solo en cada respuesta. Con auriculares el
+  // micrófono no capta el TTS y queda sensible; con parlantes sube por encima
+  // del eco. Un valor fijo servía para un escenario y rompía el otro.
+  const BARGE_MIN = 0.10;       // piso sin eco (auriculares)
+  const BARGE_FACTOR = 1.8;     // margen sobre el eco medido
+  const BARGE_CALIBRA_MS = 600; // ventana inicial del TTS donde se mide el eco
+  const BARGE_MS = 300;         // voz sostenida para confirmar la interrupción
   const [inLevel, setInLevel] = useState(0);
   const [outLevel, setOutLevel] = useState(0);
   const [speaking, setSpeaking] = useState(false);
@@ -571,21 +578,31 @@ export default function Hud() {
           inicioVoz.current = 0;
         }
 
-        // Barge-in: hablarle encima interrumpe la respuesta. Exige más volumen
-        // que UMBRAL_VOZ porque el micrófono capta el propio TTS, y sostenerlo
-        // para que un ruido suelto no corte a MATE en medio de una frase.
+        // Barge-in: hablarle encima interrumpe la respuesta. Los primeros
+        // BARGE_CALIBRA_MS de cada respuesta miden cuánto del propio TTS vuelve
+        // por el micrófono, y el umbral se fija por encima de eso.
         if (hablandoRef.current) {
-          if (peak > UMBRAL_BARGE) {
-            if (!inicioBarge.current) inicioBarge.current = ahora;
-            else if (ahora - inicioBarge.current > BARGE_MS) {
-              window.speechSynthesis.cancel();   // dispara onend: limpia speaking
-              inicioBarge.current = 0;
-              push("ok", "Respuesta interrumpida");
-            }
-          } else {
-            inicioBarge.current = 0;
+          if (!inicioTTS.current) {
+            inicioTTS.current = ahora;
+            ecoPico.current = 0;
           }
-        } else if (inicioBarge.current) {
+          if (ahora - inicioTTS.current < BARGE_CALIBRA_MS) {
+            ecoPico.current = Math.max(ecoPico.current, peak);
+          } else {
+            const umbral = Math.max(BARGE_MIN, ecoPico.current * BARGE_FACTOR);
+            if (peak > umbral) {
+              if (!inicioBarge.current) inicioBarge.current = ahora;
+              else if (ahora - inicioBarge.current > BARGE_MS) {
+                window.speechSynthesis.cancel();   // dispara onend: limpia speaking
+                inicioBarge.current = 0;
+                push("ok", "Respuesta interrumpida");
+              }
+            } else {
+              inicioBarge.current = 0;
+            }
+          }
+        } else if (inicioTTS.current) {
+          inicioTTS.current = 0;
           inicioBarge.current = 0;
         }
 
