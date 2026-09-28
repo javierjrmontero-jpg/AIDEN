@@ -217,6 +217,7 @@ export default function Hud() {
   const ultimoSonido = useRef(0);
   const inicioGrab = useRef(0);
   const inicioVoz = useRef(0);
+  const inicioBarge = useRef(0);
   // El bucle de audio corre fuera de React: lee estos espejos, no el estado.
   const hablandoRef = useRef(false);
   const ocupadoRef = useRef(false);
@@ -235,6 +236,8 @@ export default function Hud() {
   const ARRANQUE_MS = 160;      // voz sostenida antes de dar por iniciada la frase
   const SILENCIO_MS = 1500;     // silencio que da por terminada la frase
   const MAX_GRAB_MS = 20000;    // tope duro por si nunca detecta silencio
+  const UMBRAL_BARGE = 0.18;    // interrumpir exige hablar más fuerte que el eco del TTS
+  const BARGE_MS = 300;         // sostenido, para que un ruido suelto no corte la respuesta
   const [inLevel, setInLevel] = useState(0);
   const [outLevel, setOutLevel] = useState(0);
   const [speaking, setSpeaking] = useState(false);
@@ -557,7 +560,8 @@ export default function Hud() {
         setInLevel(peak);
 
         // Detector: abre la captura con voz sostenida, la cierra con silencio.
-        // Mientras MATE habla no se escucha, o se transcribiría a sí mismo.
+        // Mientras MATE habla no se captura, o se transcribiría a sí mismo;
+        // el nivel sí se mide, para el barge-in de más abajo.
         const ahora = Date.now();
         const hayVoz = peak > UMBRAL_VOZ;
         if (hayVoz) {
@@ -565,6 +569,24 @@ export default function Hud() {
           if (!inicioVoz.current) inicioVoz.current = ahora;
         } else if (!recorder.current) {
           inicioVoz.current = 0;
+        }
+
+        // Barge-in: hablarle encima interrumpe la respuesta. Exige más volumen
+        // que UMBRAL_VOZ porque el micrófono capta el propio TTS, y sostenerlo
+        // para que un ruido suelto no corte a MATE en medio de una frase.
+        if (hablandoRef.current) {
+          if (peak > UMBRAL_BARGE) {
+            if (!inicioBarge.current) inicioBarge.current = ahora;
+            else if (ahora - inicioBarge.current > BARGE_MS) {
+              window.speechSynthesis.cancel();   // dispara onend: limpia speaking
+              inicioBarge.current = 0;
+              push("ok", "Respuesta interrumpida");
+            }
+          } else {
+            inicioBarge.current = 0;
+          }
+        } else if (inicioBarge.current) {
+          inicioBarge.current = 0;
         }
 
         const grabando = recorder.current?.state === "recording";
